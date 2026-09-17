@@ -1,0 +1,26 @@
+services:
+  cfmm:
+    build: .
+    container_name: cfmm
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PORT=${PORT:-8090}
+      - HOST=${HOST:-0.0.0.0}
+      - JELLYFIN_URL=${JELLYFIN_URL:-http://localhost:8096}
+      - JELLYFIN_USER=${JELLYFIN_USER:-}
+      - JELLYFIN_PASS=${JELLYFIN_PASS:-}
+      - MOVIES_DIR=${MOVIES_DIR:-/media/movies}
+      - SERIES_DIR=${SERIES_DIR:-/media/tv}
+      - ANIME_DIR=${ANIME_DIR:-/media/anime}
+      - ADULT_DIR=${ADULT_DIR:-/media/adult}
+      - WATCH_DIR=${WATCH_DIR:-/downloads}
+      - STAGING_DIR=${STAGING_DIR:-/downloads/.staging}
+      - UPLOAD_TMP_DIR=${UPLOAD_TMP_DIR:-/tmp/cfmm_uploads}
+      - WATCHER_ENABLED=${WATCHER_ENABLED:-true}
+      - WATCHER_INTERVAL=${WATCHER_INTERVAL:-10}
+    volumes:
+      - ./data:/app/data
+      - ${MEDIA_ROOT:-/media}:${MEDIA_ROOT:-/media}
+      - ${WATCH_DIR:-/downloads}:${WATCH_DIR:-/downloads}
+      - ${JELLYFIN_CONFIG_DIR:-/config}:${JELLYFIN_CONFIG_DIR:-/config}
