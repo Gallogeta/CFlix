@@ -208,10 +208,11 @@ async def auth_login_handler(request):
             "error": "Access denied: Your account does not have media management or upload permissions on this server."
         }, status=403)
 
-    # If this is the first setup and server_url was provided, persist the server URL
-    if server_url and not get_jellyfin_url():
-        cfg.set("JELLYFIN_URL", server_url.rstrip("/"))
-        emit_log(f"Media server URL configured: {server_url}")
+    # Persist the verified working resolved URL
+    resolved_url = auth_res.get("resolved_url")
+    if resolved_url and resolved_url != get_jellyfin_url():
+        cfg.set("JELLYFIN_URL", resolved_url)
+        emit_log(f"Media server URL verified and updated: {resolved_url}")
 
     session_token = secrets.token_urlsafe(32)
     SESSIONS[session_token] = {

@@ -94,32 +94,52 @@ class ConfigManager:
     def test_jellyfin(self, url: str, user: str, pw: str) -> Dict[str, Any]:
         if not url:
             return {"success": False, "error": "Media server URL is not configured."}
+        url = url.strip()
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = f"http://{url}"
         url = url.rstrip("/")
-        auth_url = f"{url}/Users/AuthenticateByName"
+
+        candidates = [url]
+        if not url.endswith("/jellyfin"):
+            candidates.append(f"{url}/jellyfin")
+
         headers = {
             "Content-Type": "application/json",
             "X-Emby-Authorization": 'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0"'
         }
         payload = {"Username": user, "Pw": pw}
-        req = urllib.request.Request(auth_url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=8) as res:
-                data = json.loads(res.read().decode("utf-8"))
-                token = data.get("AccessToken")
-                user_name = data.get("User", {}).get("Name")
-                server_id = data.get("ServerId")
-                return {
-                    "success": True,
-                    "token": token,
-                    "user_name": user_name,
-                    "user": data.get("User", {}),
-                    "server_id": server_id,
-                    "message": f"Successfully connected to media server as '{user_name}'!"
-                }
-        except urllib.error.HTTPError as e:
-            return {"success": False, "error": f"HTTP {e.code}: Authentication Failed ({e.reason})"}
-        except Exception as e:
-            return {"success": False, "error": f"Connection error: {str(e)}"}
+        last_error = "Connection failed"
+
+        for target_url in candidates:
+            auth_url = f"{target_url}/Users/AuthenticateByName"
+            try:
+                req = urllib.request.Request(auth_url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=8) as res:
+                    data = json.loads(res.read().decode("utf-8"))
+                    token = data.get("AccessToken")
+                    user_name = data.get("User", {}).get("Name")
+                    server_id = data.get("ServerId")
+                    return {
+                        "success": True,
+                        "token": token,
+                        "user_name": user_name,
+                        "user": data.get("User", {}),
+                        "server_id": server_id,
+                        "resolved_url": target_url,
+                        "message": f"Successfully connected to media server as '{user_name}'!"
+                    }
+            except urllib.error.HTTPError as e:
+                if e.code in (404, 302, 301) and target_url != candidates[-1]:
+                    continue
+                last_error = f"HTTP {e.code}: Authentication Failed ({e.reason})"
+            except urllib.error.URLError as e:
+                if target_url != candidates[-1]:
+                    continue
+                last_error = f"Network connection error: {e.reason}"
+            except Exception as e:
+                last_error = f"Connection error: {str(e)}"
+
+        return {"success": False, "error": last_error}
 
 # Global singleton
 cfg = ConfigManager()

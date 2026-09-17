@@ -105,7 +105,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ username, password, server_url: serverUrl })
                 });
-                const data = await resp.json();
+                let data;
+                try {
+                    data = await resp.json();
+                } catch (jsonErr) {
+                    data = { success: false, error: `Authentication failed (Status ${resp.status}). Check server URL and credentials.` };
+                }
                 if (data.success && (data.is_admin || data.can_manage)) {
                     isAuthenticated = true;
                     const roleLabel = data.is_admin ? "Admin" : "Manager";
