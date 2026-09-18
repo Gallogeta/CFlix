@@ -30,24 +30,33 @@ TITLE_MAP = {
     "frieren": "Frieren: Beyond Journey's End"
 }
 
+AUDIO_CHANNELS_REGEX = r"(?:\b(?:aac|ddp|dd\+|dd|ac3|dts(?:-hd)?|truehd|flac|eac3)[\.\-_]*)?\b(?:5\.1|7\.1|7\.2|5\.2|2\.0|1\.0)\b"
+
+MEDIA_TAGS_REGEX = (
+    r"\b(?:2160p|1080p|1080i|720p|576p|480p|360p|4k|8k|uhd|hdr|hdr10(?:\+)?|dv|dovi|dolby-vision|sdr|"
+    r"remux|bluray|blu-ray|bdrip|brrip|web-?dl|webrip|web-?rip|hdrip|dvdrip|dvd|hdtv|sdtv|pdtv|dsr|"
+    r"x264|x265|h264|h265|h\.264|h\.265|hevc|avc|av1|vc1|divx|xvid|10bit|8bit|12bit|hi10p|"
+    r"proper|repack|rerip|unrated|extended|directors\.cut|imax|criterion|"
+    r"amzn|amazon|nf|netflix|atvp|apple|dnp|dsnp|disney|hmax|max|itunes|"
+    r"aac|ac3|eac3|ddp|dts|dts-hd(?:-ma)?|truehd|atmos|flac|opus|mp3|lpcm|vorbis)\b"
+)
+
 CLEAN_REGEXES = [
     r"^watch\s+(?:the\s+)?(?:movie\s+|film\s+)?",
     r"\s+(?:movie|film)?\s*online\s+(?:for\s+)?(?:is\s+)?free[^\.]*",
     r"\s+online\s+free[^\.]*",
     r"\s+in\s+good\s+quality[^\.]*",
-    r"1080p|720p|480p|2160p|4k|uhd|hdr|remux|bluray|bdrip|web-dl|webrip|hdrip|dvdrip",
-    r"x264|x265|h264|h265|hevc|aac|ac3|dts|dts-hd|truehd|atmos|ddp5\.1|10bit",
+    AUDIO_CHANNELS_REGEX,
+    MEDIA_TAGS_REGEX,
     r"rezka|voidboost|filmix|hdrezka",
 ]
 
 SERIES_REGEXES = [
-    r"[sS](\d{1,2})[eE](\d{1,2})",
-    r"(\d{1,2})x(\d{1,2})",
-    r"[sS]eason\s*(\d{1,2})\s*[eE]pisode\s*(\d{1,2})",
-    r"[eE]pisode\s*(\d{1,2})"
+    r"[sS](\d{1,2})[ \.\-_]*[eE](\d{1,3})",
+    r"(\d{1,2})x(\d{1,3})",
+    r"[sS]eason\s*(\d{1,2})\s*[eE]pisode\s*(\d{1,3})",
+    r"(?:^|[ \.\-_])(?:episode|ep)[ \.\-_]*(\d{1,4})"
 ]
-
-SERIES_CLEAN_TAGS = r"\b(1080p|720p|480p|2160p|4k|uhd|hdr|remux|bluray|bdrip|web-?dl|webrip|hdrip|dvdrip|x264|x265|h264|h265|hevc|aac|ac3|dts|dts-hd|truehd|atmos|ddp5\.1|10bit|amzn|nf|ntg|proper|repack|h\.?264|h\.?265)\b"
 
 def clean_filename(filename: str) -> Dict[str, Any]:
     # Extract extension
@@ -65,7 +74,10 @@ def clean_filename(filename: str) -> Dict[str, Any]:
     # 2. Strip CRC32 hashes like [7E1C8360]
     base_name = re.sub(r"\[[0-9a-fA-F]{8}\]", "", base_name)
 
-    # 3. Strip bracketed quality/media tags: [1080p], (1080p), [Multiple Subtitle], etc.
+    # 3. Strip trailing release/scene suffix (e.g. -FLUX, -FGT, -RARBG, -YTS.MX)
+    base_name = re.sub(r"-[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)?$", "", base_name)
+
+    # 4. Strip bracketed quality/media tags: [1080p], (1080p), [Multiple Subtitle], etc.
     tag_clean_filter = lambda m: "" if re.search(r"1080p|720p|480p|2160p|4k|bdrip|web|x26|h26|hevc|hi10p|10bit|8bit|aac|flac|opus|dts|ac3|dual|sub|proper|repack|amzn|nf", m.group(0), re.I) else m.group(0)
     base_name = re.sub(r"\[[^\]]+\]|\([^\)]+\)", tag_clean_filter, base_name).strip(" -_.")
 
@@ -76,78 +88,92 @@ def clean_filename(filename: str) -> Dict[str, Any]:
     episode_title = None
     guessed_year = None
 
-    # Detect season if mentioned in text (e.g. "Season 2", "2nd Season", "S2")
-    m_s = re.search(r"\b(?:season\s*(\d{1,2})|(\d{1,2})(?:nd|rd|th|st)\s*season|s(\d{1,2}))\b", base_name, re.I)
-    detected_season = 1
-    if m_s:
-        detected_season = int(m_s.group(1) or m_s.group(2) or m_s.group(3))
-        # Remove season indicator from base_name so it doesn't get confused for episode number
-        base_name = re.sub(r"\b(?:season\s*\d{1,2}|\d{1,2}(?:nd|rd|th|st)\s*season|s\d{1,2})\b", "", base_name, flags=re.I).strip(" -_.")
+    # Detect season if mentioned in text (e.g. "Season 2", "2nd Season")
+    m_s = re.search(r"\b(?:season\s*(\d{1,2})|(\d{1,2})(?:nd|rd|th|st)\s*season)\b", base_name, re.I)
+    detected_season = int(m_s.group(1) or m_s.group(2)) if m_s else 1
 
-    # A. Check standard series patterns: ShowName S01E02 EpTitle / 1x02 / Season 1 Episode 2
+    # Pattern A: Check standard series patterns: ShowName S01E02 EpTitle / 1x02 / Season 1 Episode 2
     m = re.search(
-        r"^(.*?)[ \.\-_]+(?:[sS](\d{1,2})[eE](\d{1,3})|(\d{1,2})x(\d{1,3})|[sS]eason[ \.\-_]*(\d{1,2})[ \.\-_]+[eE]pisode[ \.\-_]*(\d{1,3})|[eE]pisode[ \.\-_]*(\d{1,3}))(?:[ \.\-_]+(.*?))?$",
+        r"^(.*?)[ \.\-_]+(?:[sS](\d{1,2})[ \.\-_]*[eE](\d{1,3})|(\d{1,2})x(\d{1,3})|[sS]eason[ \.\-_]*(\d{1,2})[ \.\-_]+[eE]pisode[ \.\-_]*(\d{1,3}))(?:[ \.\-_]+(.*?))?$",
         base_name,
         re.IGNORECASE
     )
     if m:
         is_series = True
         raw_show = m.group(1)
-        year_m = re.search(r"\b(19\d\d|20[0-33]\d)\b", raw_show)
+        year_m = re.search(r"\b(19\d\d|20[0-3]\d)\b", raw_show)
         if year_m:
             guessed_year = year_m.group(1)
             raw_show = re.sub(r"\b(19\d\d|20[0-3]\d)\b", "", raw_show)
         
         series_show_name = re.sub(r"[_\.\-\+]+", " ", raw_show).strip(" -_.")
         season_num = int(m.group(2) or m.group(4) or m.group(6) or detected_season)
-        episode_num = int(m.group(3) or m.group(5) or m.group(7) or m.group(8))
+        episode_num = int(m.group(3) or m.group(5) or m.group(7))
         
-        rest = m.group(9) or ""
-        cleaned_ep_title = re.sub(SERIES_CLEAN_TAGS, "", rest, flags=re.IGNORECASE)
-        cleaned_ep_title = re.sub(r"[_\.\-\+]+", " ", cleaned_ep_title).strip(" -_.")
-        if cleaned_ep_title:
-            episode_title = cleaned_ep_title
+        rest = m.group(8) or ""
+        rest_clean = re.sub(AUDIO_CHANNELS_REGEX, "", rest, flags=re.I)
+        rest_clean = re.sub(MEDIA_TAGS_REGEX, "", rest_clean, flags=re.I)
+        rest_clean = re.sub(r"[_\.\-\+]+", " ", rest_clean).strip(" -_.")
+        if rest_clean:
+            episode_title = rest_clean
     else:
-        # B. Check Anime / standalone episode notation: e.g. "Show - 01" or "01 - Pilot" or "Show 01"
-        m2 = re.search(r"^(.*?)(?:[ \.\-_]+(?:episode|ep)?[ \.\-_]*|[\s]+)(\d{1,3})(?:[ \.\-_]+(.*?))?$", base_name, re.I)
-        if m2 and not re.search(r"^\d{4}$", m2.group(2)):
-            raw_prefix = m2.group(1).strip(" -_.")
-            num = int(m2.group(2))
-            rest = (m2.group(3) or "").strip(" -_.")
-            if not raw_prefix:
+        # Pattern B: Check explicit Episode prefix: e.g. "Show - Episode 01" or "Show - Ep 02"
+        m_ep = re.search(r"^(.*?)[ \.\-_]+(?:episode|ep)[ \.\-_]*(\d{1,4})(?:[ \.\-_]+(.*?))?$", base_name, re.I)
+        if m_ep:
+            is_series = True
+            raw_show = m_ep.group(1)
+            year_m = re.search(r"\b(19\d\d|20[0-3]\d)\b", raw_show)
+            if year_m:
+                guessed_year = year_m.group(1)
+                raw_show = re.sub(r"\b(19\d\d|20[0-3]\d)\b", "", raw_show)
+            series_show_name = re.sub(r"[_\.\-\+]+", " ", raw_show).strip(" -_.")
+            season_num = detected_season
+            episode_num = int(m_ep.group(2))
+            rest = m_ep.group(3) or ""
+            rest_clean = re.sub(AUDIO_CHANNELS_REGEX, "", rest, flags=re.I)
+            rest_clean = re.sub(MEDIA_TAGS_REGEX, "", rest_clean, flags=re.I)
+            rest_clean = re.sub(r"[_\.\-\+]+", " ", rest_clean).strip(" -_.")
+            if rest_clean:
+                episode_title = rest_clean
+        else:
+            # Pattern C: Check Anime dash format: e.g. "Show Name - 01" or "Show Name - 01 - Episode Title"
+            m_anime = re.search(r"^(.*?)\s+[-_–—]\s*(\d{1,4})(?:\s+[-_–—]\s*(.*?))?$", base_name)
+            if m_anime and not re.search(r"^\d{4}$", m_anime.group(2)):
                 is_series = True
+                series_show_name = m_anime.group(1).strip(" -_.")
                 season_num = detected_season
-                episode_num = num
-                if rest:
-                    cleaned_ep_title = re.sub(SERIES_CLEAN_TAGS, "", rest, flags=re.IGNORECASE).strip(" -_.")
-                    if cleaned_ep_title:
-                        episode_title = cleaned_ep_title
-            else:
-                clean_prefix = re.sub(r"\b(?:season\s*\d+|\d+(?:nd|rd|th|st)\s*season|s\d+)\b", "", raw_prefix, flags=re.I).strip(" -_.")
-                if clean_prefix:
-                    is_series = True
-                    series_show_name = clean_prefix
-                    season_num = detected_season
-                    episode_num = num
-                    if rest:
-                        cleaned_ep_title = re.sub(SERIES_CLEAN_TAGS, "", rest, flags=re.IGNORECASE).strip(" -_.")
-                        if cleaned_ep_title:
-                            episode_title = cleaned_ep_title
+                episode_num = int(m_anime.group(2))
+                if m_anime.group(3):
+                    rest_clean = re.sub(AUDIO_CHANNELS_REGEX, "", m_anime.group(3), flags=re.I)
+                    rest_clean = re.sub(MEDIA_TAGS_REGEX, "", rest_clean, flags=re.I)
+                    rest_clean = re.sub(r"[_\.\-\+]+", " ", rest_clean).strip(" -_.")
+                    if rest_clean:
+                        episode_title = rest_clean
 
-    # Look for year in base_name if not already found
+    # Detect year if not already found
     if not guessed_year:
-        year_match = re.search(r"\b(19\d\d|20[0-3]\d)\b", base_name)
-        guessed_year = year_match.group(1) if year_match else None
+        years = re.findall(r"\b(19\d\d|20[0-3]\d)\b", base_name)
+        if years:
+            guessed_year = years[-1] if len(years) > 1 and years[0] == "1917" else years[0]
 
     # Clean title string
     if is_series and series_show_name:
         cleaned = series_show_name
     else:
         cleaned = base_name
+        cleaned = re.sub(AUDIO_CHANNELS_REGEX, " ", cleaned, flags=re.I)
+        cleaned = re.sub(MEDIA_TAGS_REGEX, " ", cleaned, flags=re.I)
         for r in CLEAN_REGEXES:
             cleaned = re.sub(r, " ", cleaned, flags=re.IGNORECASE)
+        if guessed_year:
+            m_y = re.search(r"^(.*?)[ \.\-_\(\[]+" + guessed_year, cleaned)
+            if m_y and m_y.group(1).strip():
+                cleaned = m_y.group(1)
+            else:
+                cleaned = re.sub(r"[\(\[]?\s*" + guessed_year + r"\s*[\)\]]?", " ", cleaned)
 
-    # Remove non-alphanumeric except spaces
+    # Clean empty brackets/parentheses and normalize spaces
+    cleaned = re.sub(r"[\(\[\{]\s*[\)\]\}]", "", cleaned)
     cleaned = re.sub(r"[_\.\-\+]+", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_.")
 
@@ -163,7 +189,7 @@ def clean_filename(filename: str) -> Dict[str, Any]:
     return {
         "original_filename": filename,
         "cleaned_title": cleaned,
-        "series_show_name": series_show_name or cleaned if is_series else None,
+        "series_show_name": series_show_name or (cleaned if is_series else None),
         "guessed_year": guessed_year,
         "is_series": is_series,
         "season": season_num,

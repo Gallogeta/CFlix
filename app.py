@@ -76,6 +76,26 @@ def is_admin_request(request: web.Request) -> bool:
     return bool(user and user.get("is_admin"))
 
 @web.middleware
+async def error_handling_middleware(request: web.Request, handler):
+    try:
+        return await handler(request)
+    except web.HTTPException as ex:
+        if request.path.startswith("/api/"):
+            return web.json_response(
+                {"success": False, "error": ex.reason or str(ex)},
+                status=ex.status
+            )
+        raise
+    except Exception as e:
+        emit_log(f"Unhandled error on {request.method} {request.path}: {e}")
+        if request.path.startswith("/api/"):
+            return web.json_response(
+                {"success": False, "error": f"Server processing error: {str(e)}"},
+                status=500
+            )
+        raise
+
+@web.middleware
 async def security_headers_middleware(request: web.Request, handler):
     resp = await handler(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
@@ -658,7 +678,7 @@ async def logs_stream_handler(request):
 def create_app():
     app = web.Application(
         client_max_size=1024 * 1024 * 1024 * 20,  # Support up to 20GB streaming upload
-        middlewares=[security_headers_middleware, auth_middleware]
+        middlewares=[error_handling_middleware, security_headers_middleware, auth_middleware]
     )
     app.add_routes(routes)
     

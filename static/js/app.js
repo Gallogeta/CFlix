@@ -934,12 +934,30 @@ document.addEventListener("DOMContentLoaded", () => {
             metaQuery.value = data.cleaned_title;
             if (data.is_series) {
                 // Switch radio to series
-                document.querySelector("input[value='series']").checked = true;
-                radioCards.forEach(c => c.classList.remove("active"));
-                document.querySelector("input[value='series']").closest(".radio-card").classList.add("active");
+                const seriesRadio = document.querySelector("input[name='target-library'][value='series']") ||
+                                    document.querySelector("input[name='target-library'][data-type='series']") ||
+                                    document.querySelector("input[value='series']");
+                if (seriesRadio) {
+                    seriesRadio.checked = true;
+                    document.querySelectorAll("#dynamic-library-cards .radio-card, .radio-cards .radio-card").forEach(c => c.classList.remove("active"));
+                    const card = seriesRadio.closest(".radio-card");
+                    if (card) card.classList.add("active");
+                }
                 seriesInputs.classList.remove("hidden");
                 if (data.season) seriesSeason.value = data.season;
                 if (data.episode) seriesEpisode.value = data.episode;
+            } else {
+                // Switch radio to movies
+                const moviesRadio = document.querySelector("input[name='target-library'][value='movies']") ||
+                                    document.querySelector("input[name='target-library'][data-type='movies']") ||
+                                    document.querySelector("input[value='movies']");
+                if (moviesRadio) {
+                    moviesRadio.checked = true;
+                    document.querySelectorAll("#dynamic-library-cards .radio-card, .radio-cards .radio-card").forEach(c => c.classList.remove("active"));
+                    const card = moviesRadio.closest(".radio-card");
+                    if (card) card.classList.add("active");
+                }
+                seriesInputs.classList.add("hidden");
             }
 
             // Search IMDb
