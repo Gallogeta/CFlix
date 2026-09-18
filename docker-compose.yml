@@ -14,6 +14,8 @@ services:
       - SERIES_DIR=${SERIES_DIR:-/media/tv}
       - ANIME_DIR=${ANIME_DIR:-/media/anime}
       - ADULT_DIR=${ADULT_DIR:-/media/adult}
+      - MEDIA_ROOT=${MEDIA_ROOT:-/media}
+      - JELLYFIN_MEDIA_PATH=${JELLYFIN_MEDIA_PATH:-/media}
       - WATCH_DIR=${WATCH_DIR:-/downloads}
       - STAGING_DIR=${STAGING_DIR:-/downloads/.staging}
       - UPLOAD_TMP_DIR=${UPLOAD_TMP_DIR:-/tmp/cfmm_uploads}
