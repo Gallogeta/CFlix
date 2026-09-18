@@ -35,6 +35,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "SERIES_DIR": os.environ.get("SERIES_DIR", "/media/tv"),
     "ANIME_DIR": os.environ.get("ANIME_DIR", "/media/anime"),
     "ADULT_DIR": os.environ.get("ADULT_DIR", "/media/adult"),
+    "MEDIA_ROOT": os.environ.get("MEDIA_ROOT", "/media"),
+    "JELLYFIN_MEDIA_PATH": os.environ.get("JELLYFIN_MEDIA_PATH", "/media"),
     "WATCH_DIR": os.environ.get("WATCH_DIR", "/downloads"),
     "STAGING_DIR": os.environ.get("STAGING_DIR", "/downloads/.staging"),
     "UPLOAD_TMP_DIR": os.environ.get("UPLOAD_TMP_DIR", "/tmp/cfmm_uploads"),
@@ -95,7 +97,9 @@ class ConfigManager:
                 elif isinstance(v, str):
                     # Clean trailing slashes for paths and URLs
                     v_clean = v.strip()
-                    if k.endswith("_DIR"):
+                    if k.endswith("_DIR") or k in ("MEDIA_ROOT", "JELLYFIN_MEDIA_PATH"):
+                        if v_clean and not v_clean.startswith("/") and not v_clean.startswith("\\"):
+                            v_clean = "/" + v_clean
                         v_clean = os.path.normpath(v_clean)
                     elif k == "JELLYFIN_URL":
                         v_clean = normalize_jellyfin_url(v_clean)
@@ -188,6 +192,9 @@ def get_anime_dir() -> str:
 
 def get_adult_dir() -> str:
     return cfg.get("ADULT_DIR", "/media/adult")
+
+def get_media_root() -> str:
+    return cfg.get("MEDIA_ROOT", "/media")
 
 def get_watch_dir() -> str:
     return cfg.get("WATCH_DIR", "/downloads")

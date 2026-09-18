@@ -1922,12 +1922,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const inputMoviesDir = document.getElementById("input-movies-dir");
     const inputSeriesDir = document.getElementById("input-series-dir");
+    const inputAnimeDir = document.getElementById("input-anime-dir");
     const inputAdultDir = document.getElementById("input-adult-dir");
     const inputWatchDir = document.getElementById("input-watch-dir");
     const inputWatcherInterval = document.getElementById("input-watcher-interval");
 
     const badgeMoviesDir = document.getElementById("badge-movies-dir");
     const badgeSeriesDir = document.getElementById("badge-series-dir");
+    const badgeAnimeDir = document.getElementById("badge-anime-dir");
     const badgeAdultDir = document.getElementById("badge-adult-dir");
     const badgeWatchDir = document.getElementById("badge-watch-dir");
 
@@ -1948,6 +1950,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             inputMoviesDir.value = s.MOVIES_DIR || "";
             inputSeriesDir.value = s.SERIES_DIR || "";
+            if (inputAnimeDir) inputAnimeDir.value = s.ANIME_DIR || "";
             inputAdultDir.value = s.ADULT_DIR || "";
             inputWatchDir.value = s.WATCH_DIR || "";
             inputWatcherInterval.value = s.WATCHER_INTERVAL || 10;
@@ -1995,12 +1998,13 @@ document.addEventListener("DOMContentLoaded", () => {
     function validateAllPaths(autoCreate = false) {
         checkPath(inputMoviesDir.value, badgeMoviesDir, autoCreate);
         checkPath(inputSeriesDir.value, badgeSeriesDir, autoCreate);
+        if (inputAnimeDir && badgeAnimeDir) checkPath(inputAnimeDir.value, badgeAnimeDir, autoCreate);
         checkPath(inputAdultDir.value, badgeAdultDir, autoCreate);
         checkPath(inputWatchDir.value, badgeWatchDir, autoCreate);
     }
 
     // Real-time path change validation
-    [inputMoviesDir, inputSeriesDir, inputAdultDir, inputWatchDir].forEach(input => {
+    [inputMoviesDir, inputSeriesDir, inputAnimeDir, inputAdultDir, inputWatchDir].filter(Boolean).forEach(input => {
         input.addEventListener("blur", () => validateAllPaths(false));
     });
 
@@ -2053,6 +2057,7 @@ document.addEventListener("DOMContentLoaded", () => {
             JELLYFIN_PASS: cfgJellyfinPass.value,
             MOVIES_DIR: inputMoviesDir.value,
             SERIES_DIR: inputSeriesDir.value,
+            ANIME_DIR: inputAnimeDir ? inputAnimeDir.value : "",
             ADULT_DIR: inputAdultDir.value,
             WATCH_DIR: inputWatchDir.value,
             WATCHER_INTERVAL: parseInt(inputWatcherInterval.value) || 10,
@@ -2073,14 +2078,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 // Update header status
                 checkServerStatus();
             } else {
-                showAlert("Failed to save settings.", "error");
+                showAlert(`Failed to update settings: ${res.error || "Unknown error"}`, "error");
             }
         } catch (e) {
-            showAlert(`Save error: ${e.message}`, "error");
+            showAlert(`Network error updating settings: ${e.message}`, "error");
         } finally {
             btnSaveSettings.disabled = false;
             btnSaveSettings.innerHTML = `
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;margin-right:4px;">save</span>
                 <span>Save Settings</span>
             `;
         }
@@ -2094,6 +2099,7 @@ document.addEventListener("DOMContentLoaded", () => {
             cfgJellyfinPass.value = "";
             inputMoviesDir.value = "/media/movies";
             inputSeriesDir.value = "/media/tv";
+            if (inputAnimeDir) inputAnimeDir.value = "/media/anime";
             inputAdultDir.value = "/media/adult";
             inputWatchDir.value = "/downloads";
             inputWatcherInterval.value = 10;

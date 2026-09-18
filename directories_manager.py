@@ -15,7 +15,7 @@ PROTECTED_NAMES = {
     "lost+found", "transcode", ".trash-1000", ".tmp_uploads", ".staging"
 }
 
-SYSTEM_ROOTS = {"/", "/media", "/home", "/etc", "/var", "/usr", "/bin", "/tmp"}
+SYSTEM_ROOTS = {"/", "/media", "/mnt", "/home", "/etc", "/var", "/usr", "/bin", "/tmp"}
 
 class DirectoriesManager:
     def __init__(self):
@@ -23,7 +23,7 @@ class DirectoriesManager:
 
     @property
     def media_roots(self) -> List[str]:
-        """Discovers all available media root paths and mounted disks (e.g. /media, /media/disk1, /media/disk2)."""
+        """Discovers all available media root paths and mounted disks (e.g. /mnt/media_ssd, /media, /media/disk1)."""
         roots = set()
         for p in [get_movies_dir(), get_series_dir(), get_anime_dir(), get_adult_dir()]:
             if p:
@@ -33,18 +33,21 @@ class DirectoriesManager:
                     roots.add(parent)
         
         cfg_root = os.path.normpath(cfg.get("MEDIA_ROOT", "/media"))
-        if os.path.exists(cfg_root):
+        if os.path.exists(cfg_root) and cfg_root not in SYSTEM_ROOTS:
             roots.add(cfg_root)
-            # Scan for mounted sub-disks like /media/disk1, /media/disk2, /media/hdd
-            try:
-                for entry in sorted(os.listdir(cfg_root)):
-                    if entry.startswith(".") or entry.lower() in PROTECTED_NAMES:
-                        continue
-                    full_p = os.path.join(cfg_root, entry)
-                    if os.path.isdir(full_p) and ("disk" in entry.lower() or "drive" in entry.lower() or "hdd" in entry.lower() or "ssd" in entry.lower()):
-                        roots.add(os.path.normpath(full_p))
-            except Exception:
-                pass
+
+        # Scan both /mnt and configured MEDIA_ROOT for external SSDs and storage drives
+        for base_mount in ["/mnt", cfg.get("MEDIA_ROOT", "/media")]:
+            if base_mount and os.path.exists(base_mount) and os.path.isdir(base_mount):
+                try:
+                    for entry in sorted(os.listdir(base_mount)):
+                        if entry.startswith(".") or entry.lower() in PROTECTED_NAMES:
+                            continue
+                        full_p = os.path.join(base_mount, entry)
+                        if os.path.isdir(full_p) and any(kw in entry.lower() for kw in ["media", "ssd", "disk", "drive", "hdd", "storage"]):
+                            roots.add(os.path.normpath(full_p))
+                except Exception:
+                    pass
 
         valid_roots = [r for r in sorted(list(roots)) if os.path.exists(r) and os.path.isdir(r)]
         return valid_roots if valid_roots else [cfg_root]
