@@ -15,6 +15,29 @@ PROTECTED_NAMES = {
     "lost+found", "transcode", ".trash-1000", ".tmp_uploads", ".staging"
 }
 
+MEDIA_VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".wmv", ".iso", ".ts"}
+
+def count_media_items(dir_path: str, content_type: str = "movies") -> int:
+    """Accurately counts video titles and shows instead of raw files (ignoring metadata, posters, fanarts, subtitles, trickplay)."""
+    if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
+        return 0
+    try:
+        entries = [
+            e for e in os.listdir(dir_path)
+            if not e.startswith(".")
+            and not e.endswith(".trickplay")
+            and e.lower() not in PROTECTED_NAMES
+        ]
+        if content_type == "series":
+            subdirs = [e for e in entries if os.path.isdir(os.path.join(dir_path, e))]
+            return len(subdirs) if subdirs else len([e for e in entries if os.path.splitext(e)[1].lower() in MEDIA_VIDEO_EXTS])
+        
+        video_files = [e for e in entries if not os.path.isdir(os.path.join(dir_path, e)) and os.path.splitext(e)[1].lower() in MEDIA_VIDEO_EXTS]
+        subdirs = [e for e in entries if os.path.isdir(os.path.join(dir_path, e))]
+        return len(video_files) + len(subdirs)
+    except Exception:
+        return 0
+
 SYSTEM_ROOTS = {"/", "/media", "/mnt", "/home", "/etc", "/var", "/usr", "/bin", "/tmp"}
 
 class DirectoriesManager:
@@ -138,13 +161,7 @@ class DirectoriesManager:
             seen_paths.add(norm_p)
             
             exists = os.path.exists(norm_p)
-            item_count = 0
-            if exists:
-                try:
-                    entries = os.listdir(norm_p)
-                    item_count = len([e for e in entries if not e.startswith(".")])
-                except Exception:
-                    pass
+            item_count = count_media_items(norm_p, d["type"]) if exists else 0
 
             jf_info = jf_map.get(norm_p.lower()) or jf_map.get(name.lower(), {})
             
@@ -172,11 +189,7 @@ class DirectoriesManager:
                             seen_paths.add(full_p)
                             jf_info = jf_map.get(full_p.lower()) or jf_map.get(entry.lower(), {})
                             c_type = "series" if jf_info.get("collection_type") == "tvshows" else ("adult" if "adult" in entry.lower() else "movies")
-                            
-                            try:
-                                item_count = len([e for e in os.listdir(full_p) if not e.startswith(".")])
-                            except Exception:
-                                item_count = 0
+                            item_count = count_media_items(full_p, c_type)
 
                             results.append({
                                 "name": entry,
