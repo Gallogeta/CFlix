@@ -82,66 +82,38 @@ BUILTIN_PRESETS: List[Dict[str, Any]] = [
     {
         "id": "jellyflix",
         "name": "Jellyflix (Netflix Style)",
-        "description": "Sleek Netflix streaming interface featuring red accent accents, carousel layouts, and dark backdrop.",
+        "description": "Sleek Netflix streaming interface featuring red accents, horizontal carousels, and dark backdrop.",
         "badge": "Popular",
         "accent": "#e50914",
         "gradient": "linear-gradient(135deg, #141414 0%, #221f1f 50%, #e50914 100%)",
-        "css": '/* Jellyflix - Netflix Style Theme */\n@import url("https://cdn.jsdelivr.net/gh/prayag17/Jellyflix@latest/theme.css");\n'
+        "css": '/* Jellyflix - Netflix Style Theme */\n@import url("https://cdn.jsdelivr.net/gh/prayag17/JellyFlix@latest/default.css");\n'
+    },
+    {
+        "id": "jellyskin",
+        "name": "JellySkin (Modern UI)",
+        "description": "Award-winning clean modern design with subtle shadows, rounded cards, and smooth navigation.",
+        "badge": "Modern",
+        "accent": "#8b5cf6",
+        "gradient": "linear-gradient(135deg, #0f172a 0%, #2e1065 50%, #8b5cf6 100%)",
+        "css": '/* JellySkin - Modern UI Theme */\n@import url("https://cdn.jsdelivr.net/npm/jellyskin@latest/dist/main.css");\n'
     },
     {
         "id": "ultrachromic",
         "name": "Ultrachromic (Frosted Glass)",
-        "description": "Modern frosted glass cards, dynamic background blur, and refined minimal control overlays.",
+        "description": "Modern frosted translucent glass cards, dynamic background blur, and refined controls.",
         "badge": "Glassmorphism",
         "accent": "#a855f7",
         "gradient": "linear-gradient(135deg, #0f172a 0%, #312e81 50%, #a855f7 100%)",
-        "css": '/* Ultrachromic - Modern Frosted Glass */\n@import url("https://cdn.jsdelivr.net/gh/prayag17/Ultrachromic@latest/custom_cards.css");\n@import url("https://cdn.jsdelivr.net/gh/prayag17/Ultrachromic@latest/main.css");\n'
+        "css": '/* Ultrachromic - Modern Frosted Glass */\n@import url("https://cdn.jsdelivr.net/gh/CTalvio/Ultrachromic/base.css");\n'
     },
     {
-        "id": "novapex",
-        "name": "Novapex (Cyberpunk & Minimal)",
-        "description": "Futuristic clean dark aesthetic with neon teal lines, high-contrast typography, and smooth card zooms.",
-        "badge": "Cyberpunk",
+        "id": "novachromic",
+        "name": "Novachromic (Minimalist Dark)",
+        "description": "Futuristic clean dark aesthetic with minimalist cards, neon lines, and smooth transitions.",
+        "badge": "Minimal Dark",
         "accent": "#06b6d4",
         "gradient": "linear-gradient(135deg, #030712 0%, #111827 50%, #06b6d4 100%)",
-        "css": '/* Novapex - Cyberpunk Minimal Dark */\n@import url("https://cdn.jsdelivr.net/gh/Daniel-W-S/Novapex@latest/css/Novapex.css");\n'
-    },
-    {
-        "id": "modern_slate",
-        "name": "Clean Modern Slate (Plex Style)",
-        "description": "Refined slate dark UI with subtle rounded borders, ocean blue highlights, and non-intrusive metadata bars.",
-        "badge": "Minimal",
-        "accent": "#3b82f6",
-        "gradient": "linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #3b82f6 100%)",
-        "css": """/* Clean Modern Slate - Plex Style */
-:root {
-  --accent: #3b82f6;
-  --bg-main: #0b0f19;
-  --card-bg: rgba(30, 41, 59, 0.7);
-  --card-border: rgba(148, 163, 184, 0.15);
-}
-body, .backgroundContainer {
-  background-color: var(--bg-main) !important;
-}
-.cardBox {
-  background: var(--card-bg) !important;
-  border: 1px solid var(--card-border) !important;
-  border-radius: 10px !important;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
-}
-.card:hover {
-  transform: translateY(-3px);
-}
-.card:hover .cardBox {
-  border-color: var(--accent) !important;
-  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.25) !important;
-}
-.skinHeader {
-  background: rgba(11, 15, 25, 0.92) !important;
-  backdrop-filter: blur(16px) !important;
-  border-bottom: 1px solid var(--card-border) !important;
-}
-"""
+        "css": '/* Novachromic - Minimalist Dark */\n@import url("https://ctalvio.github.io/Novachromic/default_style.css");\n'
     },
     {
         "id": "vanilla",
