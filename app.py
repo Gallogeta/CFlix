@@ -12,7 +12,7 @@ from config import (
     PORT, HOST, DATA_DIR, cfg,
     get_movies_dir, get_series_dir, get_anime_dir, get_adult_dir, get_watch_dir,
     get_staging_dir, get_upload_tmp_dir, get_jellyfin_url,
-    get_jellyfin_user, get_jellyfin_pass
+    get_jellyfin_user, get_jellyfin_pass, normalize_jellyfin_url
 )
 from logger import emit_log, subscribe, unsubscribe, get_recent_logs
 from metadata import clean_filename, search_imdb, fetch_series_episodes, search_anime, fetch_anime_episodes
@@ -157,7 +157,7 @@ async def auth_login_handler(request):
     data = await request.json()
     username = data.get("username", "").strip()
     password = data.get("password", "").strip()
-    server_url = data.get("server_url", "").strip()
+    server_url = normalize_jellyfin_url(data.get("server_url", "").strip())
 
     if not username or not password:
         return web.json_response({"success": False, "error": "Username and password are required."}, status=400)
@@ -589,16 +589,23 @@ async def get_directories_handler(request):
     dirs = await loop.run_in_executor(None, directories_mgr.list_all_directories)
     return web.json_response(dirs)
 
+@routes.get("/api/directories/parents")
+async def get_directory_parents_handler(request):
+    loop = asyncio.get_event_loop()
+    parents = await loop.run_in_executor(None, directories_mgr.get_available_parent_locations)
+    return web.json_response(parents)
+
 @routes.post("/api/directories/create")
 async def create_directory_handler(request):
     data = await request.json()
     name = data.get("name", "").strip()
     content_type = data.get("content_type", "movies")
     add_to_jellyfin = data.get("add_to_jellyfin", True)
+    parent_path = data.get("parent_path", "").strip() or None
     
     loop = asyncio.get_event_loop()
     res = await loop.run_in_executor(
-        None, directories_mgr.create_directory, name, content_type, add_to_jellyfin
+        None, directories_mgr.create_directory, name, content_type, add_to_jellyfin, parent_path
     )
     return web.json_response(res)
 
@@ -606,12 +613,13 @@ async def create_directory_handler(request):
 async def delete_directory_handler(request):
     data = await request.json()
     name = data.get("name", "").strip()
+    path = data.get("path", "").strip() or None
     remove_from_jellyfin = data.get("remove_from_jellyfin", True)
     force = data.get("force", False)
 
     loop = asyncio.get_event_loop()
     res = await loop.run_in_executor(
-        None, directories_mgr.delete_directory, name, remove_from_jellyfin, force
+        None, directories_mgr.delete_directory, name, remove_from_jellyfin, force, path
     )
     return web.json_response(res)
 

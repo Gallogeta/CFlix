@@ -149,9 +149,12 @@ class CollectionsManager:
 
     def login(self) -> bool:
         url = f"{get_jellyfin_url()}/Users/AuthenticateByName"
+        auth_val = 'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0"'
         headers = {
             "Content-Type": "application/json",
-            "X-Emby-Authorization": 'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0"'
+            "Authorization": auth_val,
+            "X-Emby-Authorization": auth_val,
+            "User-Agent": "CFlixMediaManager/1.0"
         }
         payload = {"Username": get_jellyfin_user(), "Pw": get_jellyfin_pass()}
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
@@ -171,7 +174,15 @@ class CollectionsManager:
                 return None
 
         url = f"{get_jellyfin_url()}{path}"
-        headers = {"Content-Type": "application/json", "Authorization": f'MediaBrowser Token="{self.token}"'}
+        auth_token_val = f'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0", Token="{self.token}"'
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": auth_token_val,
+            "X-Emby-Authorization": auth_token_val,
+            "X-MediaBrowser-Token": self.token,
+            "X-Emby-Token": self.token,
+            "User-Agent": "CFlixMediaManager/1.0"
+        }
         body = json.dumps(data).encode("utf-8") if data is not None else None
 
         req = urllib.request.Request(url, data=body, headers=headers, method=method)

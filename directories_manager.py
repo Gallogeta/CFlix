@@ -12,20 +12,56 @@ from config import (
 from logger import emit_log
 
 PROTECTED_NAMES = {
-    "movies", "tv", "series", "anime", "adult", "lost+found",
-    "transcode", ".trash-1000", ".tmp_uploads", ".staging"
+    "lost+found", "transcode", ".trash-1000", ".tmp_uploads", ".staging"
 }
+
+SYSTEM_ROOTS = {"/", "/media", "/home", "/etc", "/var", "/usr", "/bin", "/tmp"}
 
 class DirectoriesManager:
     def __init__(self):
         pass
 
     @property
+    def media_roots(self) -> List[str]:
+        """Discovers all available media root paths and mounted disks (e.g. /media, /media/disk1, /media/disk2)."""
+        roots = set()
+        for p in [get_movies_dir(), get_series_dir(), get_anime_dir(), get_adult_dir()]:
+            if p:
+                norm = os.path.normpath(p)
+                parent = os.path.dirname(norm)
+                if parent and parent not in SYSTEM_ROOTS and os.path.exists(parent):
+                    roots.add(parent)
+        
+        cfg_root = os.path.normpath(cfg.get("MEDIA_ROOT", "/media"))
+        if os.path.exists(cfg_root):
+            roots.add(cfg_root)
+            # Scan for mounted sub-disks like /media/disk1, /media/disk2, /media/hdd
+            try:
+                for entry in sorted(os.listdir(cfg_root)):
+                    if entry.startswith(".") or entry.lower() in PROTECTED_NAMES:
+                        continue
+                    full_p = os.path.join(cfg_root, entry)
+                    if os.path.isdir(full_p) and ("disk" in entry.lower() or "drive" in entry.lower() or "hdd" in entry.lower() or "ssd" in entry.lower()):
+                        roots.add(os.path.normpath(full_p))
+            except Exception:
+                pass
+
+        valid_roots = [r for r in sorted(list(roots)) if os.path.exists(r) and os.path.isdir(r)]
+        return valid_roots if valid_roots else [cfg_root]
+
+    @property
     def media_root(self) -> str:
-        movies_dir = get_movies_dir()
-        if movies_dir and os.path.exists(movies_dir):
-            return os.path.dirname(movies_dir)
-        return cfg.get("MEDIA_ROOT", "/media")
+        roots = self.media_roots
+        return roots[0] if roots else cfg.get("MEDIA_ROOT", "/media")
+
+    def get_available_parent_locations(self) -> List[Dict[str, str]]:
+        """Returns list of selectable parent directories for creating new libraries/folders."""
+        locations = []
+        for r in self.media_roots:
+            basename = os.path.basename(r)
+            display = f"{basename} ({r})" if basename else r
+            locations.append({"path": r, "name": display})
+        return locations
 
     def get_jellyfin_token(self) -> Optional[str]:
         auth = cfg.test_jellyfin(get_jellyfin_url(), get_jellyfin_user(), get_jellyfin_pass())
@@ -37,10 +73,14 @@ class DirectoriesManager:
             return []
         
         url = f"{get_jellyfin_url()}/Library/VirtualFolders"
+        auth_val = f'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0", Token="{token}"'
         req = urllib.request.Request(
             url,
             headers={
-                "Authorization": f'MediaBrowser Token="{token}"',
+                "Authorization": auth_val,
+                "X-Emby-Authorization": auth_val,
+                "X-MediaBrowser-Token": token,
+                "X-Emby-Token": token,
                 "User-Agent": "CFlixMediaManager/1.0"
             }
         )
@@ -52,8 +92,8 @@ class DirectoriesManager:
             return []
 
     def list_all_directories(self) -> List[Dict[str, Any]]:
-        root = self.media_root
         results = []
+        seen_paths = set()
         
         # 1. Fetch live media server virtual folders
         jf_vfs = self.get_jellyfin_virtual_folders()
@@ -64,6 +104,12 @@ class DirectoriesManager:
             locs = vf.get("Locations", [])
             for loc in locs:
                 folder_basename = os.path.basename(loc.rstrip("/"))
+                norm_loc = os.path.normpath(loc)
+                jf_map[norm_loc.lower()] = {
+                    "jf_name": name,
+                    "collection_type": ctype,
+                    "internal_location": loc
+                }
                 jf_map[folder_basename.lower()] = {
                     "jf_name": name,
                     "collection_type": ctype,
@@ -78,75 +124,85 @@ class DirectoriesManager:
             {"name": os.path.basename(get_adult_dir()), "display_name": "Adult", "type": "adult", "path": get_adult_dir()},
         ]
 
-        seen_names = set()
-
         for d in defaults:
             p = d["path"]
-            name = os.path.basename(p.rstrip("/"))
-            if not name:
+            if not p:
                 continue
-            seen_names.add(name.lower())
+            norm_p = os.path.normpath(p)
+            name = os.path.basename(norm_p)
+            if not name or norm_p in seen_paths:
+                continue
+            seen_paths.add(norm_p)
             
-            exists = os.path.exists(p)
+            exists = os.path.exists(norm_p)
             item_count = 0
             if exists:
                 try:
-                    entries = os.listdir(p)
+                    entries = os.listdir(norm_p)
                     item_count = len([e for e in entries if not e.startswith(".")])
                 except Exception:
                     pass
 
-            jf_info = jf_map.get(name.lower(), {})
+            jf_info = jf_map.get(norm_p.lower()) or jf_map.get(name.lower(), {})
             
             results.append({
                 "name": name,
                 "display_name": jf_info.get("jf_name") or d["display_name"],
-                "path": p,
+                "path": norm_p,
+                "parent_path": os.path.dirname(norm_p),
                 "type": d["type"],
                 "exists": exists,
                 "item_count": item_count,
                 "in_jellyfin": bool(jf_info),
-                "deletable": name.lower() not in PROTECTED_NAMES
+                "deletable": norm_p not in self.media_roots and norm_p not in SYSTEM_ROOTS and name.lower() not in PROTECTED_NAMES
             })
 
-        # 3. Discover any other subdirectories in media root
-        if os.path.exists(root) and os.path.isdir(root):
-            try:
-                for entry in sorted(os.listdir(root)):
-                    if entry.startswith(".") or entry.lower() in seen_names or entry.lower() in ("transcode", "lost+found", ".tmp_uploads"):
-                        continue
-                    full_p = os.path.join(root, entry)
-                    if os.path.isdir(full_p):
-                        seen_names.add(entry.lower())
-                        jf_info = jf_map.get(entry.lower(), {})
-                        c_type = "series" if jf_info.get("collection_type") == "tvshows" else "movies"
-                        
-                        try:
-                            item_count = len([e for e in os.listdir(full_p) if not e.startswith(".")])
-                        except Exception:
-                            item_count = 0
+        # 3. Discover any subdirectories in all media roots
+        for root in self.media_roots:
+            if os.path.exists(root) and os.path.isdir(root):
+                try:
+                    for entry in sorted(os.listdir(root)):
+                        if entry.startswith(".") or entry.lower() in PROTECTED_NAMES:
+                            continue
+                        full_p = os.path.normpath(os.path.join(root, entry))
+                        if os.path.isdir(full_p) and full_p not in seen_paths and full_p not in self.media_roots:
+                            seen_paths.add(full_p)
+                            jf_info = jf_map.get(full_p.lower()) or jf_map.get(entry.lower(), {})
+                            c_type = "series" if jf_info.get("collection_type") == "tvshows" else ("adult" if "adult" in entry.lower() else "movies")
+                            
+                            try:
+                                item_count = len([e for e in os.listdir(full_p) if not e.startswith(".")])
+                            except Exception:
+                                item_count = 0
 
-                        results.append({
-                            "name": entry,
-                            "display_name": jf_info.get("jf_name") or entry,
-                            "path": full_p,
-                            "type": c_type,
-                            "exists": True,
-                            "item_count": item_count,
-                            "in_jellyfin": bool(jf_info),
-                            "deletable": entry.lower() not in PROTECTED_NAMES
-                        })
-            except Exception as e:
-                emit_log(f"Error inspecting media root '{root}': {e}")
+                            results.append({
+                                "name": entry,
+                                "display_name": jf_info.get("jf_name") or entry,
+                                "path": full_p,
+                                "parent_path": root,
+                                "type": c_type,
+                                "exists": True,
+                                "item_count": item_count,
+                                "in_jellyfin": bool(jf_info),
+                                "deletable": full_p not in self.media_roots and full_p not in SYSTEM_ROOTS and entry.lower() not in PROTECTED_NAMES
+                            })
+                except Exception as e:
+                    emit_log(f"Error inspecting media root '{root}': {e}")
 
         return results
 
-    def create_directory(self, folder_name: str, content_type: str = "movies", add_to_jellyfin: bool = True) -> Dict[str, Any]:
-        folder_name = folder_name.strip()
-        if not folder_name or any(c in folder_name for c in [":", "/", "\\", "..", "*", "?", "<", ">", "|"]):
+    def create_directory(self, folder_name: str, content_type: str = "movies", add_to_jellyfin: bool = True, parent_path: Optional[str] = None) -> Dict[str, Any]:
+        """Creates a new filesystem directory in the chosen parent disk/root and optionally links it to Jellyfin."""
+        folder_name = folder_name.strip().strip("/\\")
+        if not folder_name or any(c in folder_name for c in [":", "..", "*", "?", "<", ">", "|"]):
             return {"success": False, "error": "Invalid directory name. Special characters are not allowed."}
 
-        target_path = os.path.join(self.media_root, folder_name)
+        # Resolve parent base
+        base = self.media_root
+        if parent_path and os.path.exists(parent_path) and os.path.isdir(parent_path):
+            base = os.path.normpath(parent_path)
+
+        target_path = os.path.normpath(os.path.join(base, folder_name))
         try:
             os.makedirs(target_path, exist_ok=True)
             try:
@@ -163,7 +219,12 @@ class DirectoriesManager:
             token = self.get_jellyfin_token()
             if token:
                 media_path_prefix = cfg.get("JELLYFIN_MEDIA_PATH", "/media")
-                jf_container_path = f"{media_path_prefix.rstrip('/')}/{folder_name}"
+                rel_from_base = os.path.relpath(target_path, cfg.get("MEDIA_ROOT", "/media"))
+                if not rel_from_base.startswith(".."):
+                    jf_container_path = f"{media_path_prefix.rstrip('/')}/{rel_from_base}"
+                else:
+                    jf_container_path = target_path
+
                 jf_collection_type = "tvshows" if content_type == "series" else "movies"
                 
                 url = (
@@ -173,7 +234,14 @@ class DirectoriesManager:
                     f"paths={urllib.parse.quote(jf_container_path)}&"
                     f"refreshLibrary=true"
                 )
-                headers = {"Authorization": f'MediaBrowser Token="{token}"'}
+                auth_val = f'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0", Token="{token}"'
+                headers = {
+                    "Authorization": auth_val,
+                    "X-Emby-Authorization": auth_val,
+                    "X-MediaBrowser-Token": token,
+                    "X-Emby-Token": token,
+                    "User-Agent": "CFlixMediaManager/1.0"
+                }
                 req = urllib.request.Request(url, headers=headers, method="POST")
                 try:
                     with urllib.request.urlopen(req, timeout=8) as res:
@@ -187,23 +255,51 @@ class DirectoriesManager:
             "success": True,
             "name": folder_name,
             "path": target_path,
+            "parent_path": base,
             "type": content_type,
             "in_jellyfin": add_to_jellyfin
         }
 
-    def delete_directory(self, folder_name: str, remove_from_jellyfin: bool = True, force: bool = False) -> Dict[str, Any]:
+    def delete_directory(self, folder_name: str, remove_from_jellyfin: bool = True, force: bool = False, path: Optional[str] = None) -> Dict[str, Any]:
+        """Deletes a directory from filesystem and unlinks it from Jellyfin."""
         folder_name = folder_name.strip()
-        if folder_name.lower() in PROTECTED_NAMES:
-            return {"success": False, "error": f"Cannot delete core protected directory '{folder_name}'."}
-
-        target_path = os.path.join(self.media_root, folder_name)
         
+        # Locate target path
+        target_path = None
+        if path and os.path.exists(path):
+            target_path = os.path.normpath(path)
+        else:
+            # Match from list
+            all_dirs = self.list_all_directories()
+            for d in all_dirs:
+                if d["name"].lower() == folder_name.lower() or d["path"].lower() == folder_name.lower():
+                    target_path = d["path"]
+                    folder_name = d["name"]
+                    break
+            if not target_path:
+                target_path = os.path.normpath(os.path.join(self.media_root, folder_name))
+
+        # Security check: never delete system roots or storage roots
+        if target_path in SYSTEM_ROOTS or target_path in self.media_roots:
+            return {"success": False, "error": f"Cannot delete core root filesystem path '{target_path}'."}
+
+        base_name = os.path.basename(target_path)
+        if base_name.lower() in PROTECTED_NAMES:
+            return {"success": False, "error": f"Cannot delete core protected directory '{base_name}'."}
+
         # 1. Remove from media server if requested
         if remove_from_jellyfin and get_jellyfin_url():
             token = self.get_jellyfin_token()
             if token:
                 url = f"{get_jellyfin_url()}/Library/VirtualFolders?name={urllib.parse.quote(folder_name)}&refreshLibrary=true"
-                headers = {"Authorization": f'MediaBrowser Token="{token}"'}
+                auth_val = f'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0", Token="{token}"'
+                headers = {
+                    "Authorization": auth_val,
+                    "X-Emby-Authorization": auth_val,
+                    "X-MediaBrowser-Token": token,
+                    "X-Emby-Token": token,
+                    "User-Agent": "CFlixMediaManager/1.0"
+                }
                 req = urllib.request.Request(url, headers=headers, method="DELETE")
                 try:
                     with urllib.request.urlopen(req, timeout=8) as res:
@@ -218,7 +314,8 @@ class DirectoriesManager:
                 if entries and not force:
                     return {
                         "success": False,
-                        "error": f"Directory '{folder_name}' is not empty ({len(entries)} items). Set force=true to delete contents."
+                        "error": f"Directory '{base_name}' is not empty ({len(entries)} items). Confirm to force delete all contents.",
+                        "requires_force": True
                     }
                 
                 if force:
@@ -230,6 +327,6 @@ class DirectoriesManager:
                 emit_log(f"Error removing directory '{target_path}': {e}")
                 return {"success": False, "error": f"Error deleting directory: {str(e)}"}
 
-        return {"success": True, "message": f"Successfully deleted directory '{folder_name}'."}
+        return {"success": True, "message": f"Successfully deleted directory '{base_name}'."}
 
 directories_mgr = DirectoriesManager()

@@ -84,11 +84,20 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    function cleanServerUrl(url) {
+        if (!url) return "";
+        let clean = url.trim();
+        clean = clean.split("#")[0];
+        clean = clean.replace(/\/web(?:\/.*)?$/i, "");
+        return clean.replace(/\/+$/, "");
+    }
+
     if (loginForm) {
         loginForm.addEventListener("submit", async (e) => {
             e.preventDefault();
             const serverUrlEl = document.getElementById("login-server-url");
-            const serverUrl = serverUrlEl ? serverUrlEl.value.trim() : "";
+            let serverUrl = serverUrlEl ? cleanServerUrl(serverUrlEl.value) : "";
+            if (serverUrlEl && serverUrl) serverUrlEl.value = serverUrl;
             const username = loginUsernameInput ? loginUsernameInput.value.trim() : "";
             const password = loginPasswordInput ? loginPasswordInput.value.trim() : "";
             if (!username || !password) return;
@@ -335,6 +344,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnCancelCreateDir = document.getElementById("btn-cancel-create-dir");
     const btnSubmitCreateDir = document.getElementById("btn-submit-create-dir");
     const newDirName = document.getElementById("new-dir-name");
+    const newDirParent = document.getElementById("new-dir-parent");
     const newDirType = document.getElementById("new-dir-type");
     const newDirAddJf = document.getElementById("new-dir-add-jf");
 
@@ -342,8 +352,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async function loadMediaDirectories() {
         try {
-            const resp = await apiFetch("/api/directories");
+            const [resp, parentsResp] = await Promise.all([
+                apiFetch("/api/directories"),
+                apiFetch("/api/directories/parents")
+            ]);
             mediaDirectories = await resp.json();
+            if (parentsResp && parentsResp.ok && newDirParent) {
+                const parents = await parentsResp.json();
+                newDirParent.innerHTML = "";
+                parents.forEach(p => {
+                    const opt = document.createElement("option");
+                    opt.value = p.path;
+                    opt.textContent = p.name;
+                    newDirParent.appendChild(opt);
+                });
+            }
             renderDynamicLibraryCards();
             renderBatchLibraryCards();
             renderDirectoriesTable();
@@ -463,7 +486,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 "<span class='stat-tag stat-missing'>Folder Only</span>";
 
             const deleteAction = d.deletable ? `
-                <button type="button" class="btn-secondary btn-sm btn-delete-dir" data-name="${d.name}">
+                <button type="button" class="btn-secondary btn-sm btn-delete-dir" data-name="${d.name}" data-path="${d.path}">
                     🗑️ Delete
                 </button>
             ` : `<span style="color: var(--c-muted-grey); font-size: 0.75rem;">Core Protected</span>`;
@@ -484,14 +507,15 @@ document.addEventListener("DOMContentLoaded", () => {
         document.querySelectorAll(".btn-delete-dir").forEach(btn => {
             btn.addEventListener("click", async () => {
                 const name = btn.getAttribute("data-name");
-                if (confirm(`Are you sure you want to delete directory '${name}' and unlink it from Jellyfin?`)) {
+                const path = btn.getAttribute("data-path");
+                if (confirm(`Are you sure you want to delete directory '${name}' (${path}) and unlink it from Jellyfin?`)) {
                     btn.disabled = true;
                     btn.textContent = "Deleting...";
                     try {
                         const resp = await apiFetch("/api/directories/delete", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ name, remove_from_jellyfin: true, force: false })
+                            body: JSON.stringify({ name, path, remove_from_jellyfin: true, force: false })
                         });
                         const res = await resp.json();
                         if (res.success) {
@@ -502,7 +526,7 @@ document.addEventListener("DOMContentLoaded", () => {
                                 const forceResp = await apiFetch("/api/directories/delete", {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ name, remove_from_jellyfin: true, force: true })
+                                    body: JSON.stringify({ name, path, remove_from_jellyfin: true, force: true })
                                 });
                                 const forceRes = await forceResp.json();
                                 if (forceRes.success) {
@@ -560,19 +584,21 @@ document.addEventListener("DOMContentLoaded", () => {
             btnSubmitCreateDir.textContent = "Creating...";
 
             try {
+                const parentPath = newDirParent ? newDirParent.value : "";
                 const resp = await apiFetch("/api/directories/create", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         name,
                         content_type: newDirType.value,
-                        add_to_jellyfin: newDirAddJf.checked
+                        add_to_jellyfin: newDirAddJf.checked,
+                        parent_path: parentPath
                     })
                 });
                 const res = await resp.json();
 
                 if (res.success) {
-                    alert(`Directory '${name}' created on SSD and registered in Jellyfin!`);
+                    alert(`Directory '${name}' created on disk and registered in Jellyfin!`);
                     createDirBox.classList.add("hidden");
                     newDirName.value = "";
                     loadMediaDirectories();

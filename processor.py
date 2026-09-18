@@ -20,9 +20,12 @@ def sanitize_filename(name: str) -> str:
 
 def get_jellyfin_token():
     url = f"{get_jellyfin_url()}/Users/AuthenticateByName"
+    auth_val = 'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0"'
     headers = {
         "Content-Type": "application/json",
-        "X-Emby-Authorization": 'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0"'
+        "Authorization": auth_val,
+        "X-Emby-Authorization": auth_val,
+        "User-Agent": "CFlixMediaManager/1.0"
     }
     payload = {"Username": get_jellyfin_user(), "Pw": get_jellyfin_pass()}
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
@@ -40,7 +43,14 @@ def trigger_jellyfin_refresh():
         return False
     
     url = f"{get_jellyfin_url()}/Library/Refresh"
-    headers = {"Authorization": f'MediaBrowser Token="{token}"'}
+    auth_token_val = f'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0", Token="{token}"'
+    headers = {
+        "Authorization": auth_token_val,
+        "X-Emby-Authorization": auth_token_val,
+        "X-MediaBrowser-Token": token,
+        "X-Emby-Token": token,
+        "User-Agent": "CFlixMediaManager/1.0"
+    }
     req = urllib.request.Request(url, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=5) as res:

@@ -8,11 +8,27 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
+import re
+from urllib.parse import urlparse
+
+def normalize_jellyfin_url(url: str) -> str:
+    """Cleans and normalizes any Jellyfin server URL or address entered by user."""
+    if not url:
+        return ""
+    url = url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = f"http://{url}"
+    # Strip any fragments (e.g. #/home)
+    url = url.split("#")[0]
+    # Strip any /web or /web/... paths
+    url = re.sub(r"/web(?:/.*)?$", "", url, flags=re.IGNORECASE)
+    return url.rstrip("/")
+
 # Clean, Generic Default Profile (Configurable via UI or Environment Variables)
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "PORT": int(os.environ.get("PORT", 8090)),
     "HOST": os.environ.get("HOST", "0.0.0.0"),
-    "JELLYFIN_URL": os.environ.get("JELLYFIN_URL", ""),
+    "JELLYFIN_URL": normalize_jellyfin_url(os.environ.get("JELLYFIN_URL", "")),
     "JELLYFIN_USER": os.environ.get("JELLYFIN_USER", ""),
     "JELLYFIN_PASS": os.environ.get("JELLYFIN_PASS", ""),
     "MOVIES_DIR": os.environ.get("MOVIES_DIR", "/media/movies"),
@@ -59,6 +75,8 @@ class ConfigManager:
         return self._settings.get(key, default)
 
     def set(self, key: str, value: Any):
+        if key == "JELLYFIN_URL" and isinstance(value, str):
+            value = normalize_jellyfin_url(value)
         self._settings[key] = value
         self.save()
 
@@ -80,7 +98,7 @@ class ConfigManager:
                     if k.endswith("_DIR"):
                         v_clean = os.path.normpath(v_clean)
                     elif k == "JELLYFIN_URL":
-                        v_clean = v_clean.rstrip("/")
+                        v_clean = normalize_jellyfin_url(v_clean)
                     self._settings[k] = v_clean
                 else:
                     self._settings[k] = v
@@ -94,18 +112,20 @@ class ConfigManager:
     def test_jellyfin(self, url: str, user: str, pw: str) -> Dict[str, Any]:
         if not url:
             return {"success": False, "error": "Media server URL is not configured."}
-        url = url.strip()
-        if not url.startswith("http://") and not url.startswith("https://"):
-            url = f"http://{url}"
-        url = url.rstrip("/")
+        url = normalize_jellyfin_url(url)
+        if not url:
+            return {"success": False, "error": "Invalid media server URL."}
 
         candidates = [url]
         if not url.endswith("/jellyfin"):
             candidates.append(f"{url}/jellyfin")
 
+        auth_value = 'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0"'
         headers = {
             "Content-Type": "application/json",
-            "X-Emby-Authorization": 'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0"'
+            "Authorization": auth_value,
+            "X-Emby-Authorization": auth_value,
+            "User-Agent": "CFlixMediaManager/1.0"
         }
         payload = {"Username": user, "Pw": pw}
         last_error = "Connection failed"
@@ -129,6 +149,9 @@ class ConfigManager:
                         "message": f"Successfully connected to media server as '{user_name}'!"
                     }
             except urllib.error.HTTPError as e:
+                # If credentials are wrong, don't fallback to /jellyfin candidate and return 404
+                if e.code == 401:
+                    return {"success": False, "error": "Invalid username or password on media server."}
                 if e.code in (404, 302, 301) and target_url != candidates[-1]:
                     continue
                 last_error = f"HTTP {e.code}: Authentication Failed ({e.reason})"

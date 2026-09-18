@@ -574,25 +574,34 @@
                                 <h4>Create New Media Directory & Jellyfin Library</h4>
                                 <div class="form-row">
                                     <div class="form-group half">
-                                        <label class="input-label">Directory Name</label>
+                                        <label class="input-label">Directory / Folder Name</label>
                                         <input type="text" id="new-dir-name" class="text-input" placeholder="e.g. Documentaries, Anime, 4K Movies">
                                     </div>
+                                    <div class="form-group half">
+                                        <label class="input-label">Parent Storage Disk / Root</label>
+                                        <select id="new-dir-parent" class="text-input select-input">
+                                            <option value="">Default Media Storage</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-row align-center">
                                     <div class="form-group half">
                                         <label class="input-label">Content Type</label>
                                         <select id="new-dir-type" class="text-input select-input">
                                             <option value="movies">Movies (Feature Films)</option>
                                             <option value="series">Shows / TV Series (Seasons & Episodes)</option>
+                                            <option value="adult">Adult (18+)</option>
                                         </select>
                                     </div>
-                                </div>
-                                <div class="form-row align-center">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="new-dir-add-jf" checked>
-                                        <span>Automatically register as a Library in Jellyfin</span>
-                                    </label>
-                                    <div class="button-group-right">
-                                        <button type="button" class="btn-secondary btn-sm" id="btn-cancel-create-dir">Cancel</button>
-                                        <button type="button" class="btn-primary btn-sm" id="btn-submit-create-dir">Create on SSD</button>
+                                    <div class="form-group half">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="new-dir-add-jf" checked>
+                                            <span>Automatically register as Library in Jellyfin</span>
+                                        </label>
+                                        <div class="button-group-right margin-top-xs">
+                                            <button type="button" class="btn-secondary btn-sm" id="btn-cancel-create-dir">Cancel</button>
+                                            <button type="button" class="btn-primary btn-sm" id="btn-submit-create-dir">Create on Disk</button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
