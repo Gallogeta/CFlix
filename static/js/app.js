@@ -332,6 +332,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (targetId === "queue-tab") loadIncomingQueue();
             if (targetId === "collections-tab") loadCollections();
+            if (targetId === "themes-tab") loadThemes();
         });
     });
 
@@ -2136,6 +2137,212 @@ document.addEventListener("DOMContentLoaded", () => {
             btnForceJellyfinRefresh.disabled = false;
         }
     });
+
+    // ==========================================================
+    // THEMES & SKINS MANAGEMENT (ON-THE-FLY THEME ENGINE)
+    // ==========================================================
+    const themePresetsContainer = document.getElementById("theme-presets-container");
+    const themeActiveBadge = document.getElementById("theme-active-badge");
+    const themeCssEditor = document.getElementById("theme-css-editor");
+    const btnOpenJellyfinLink = document.getElementById("btn-open-jellyfin-link");
+    const btnRefreshThemes = document.getElementById("btn-refresh-themes");
+    const btnApplyCustomCss = document.getElementById("btn-apply-custom-css");
+    const btnRevertStockTheme = document.getElementById("btn-revert-stock-theme");
+    const btnSaveCustomPresetBtn = document.getElementById("btn-save-custom-preset-btn");
+    const themeEditorFeedback = document.getElementById("theme-editor-feedback");
+
+    let loadedThemesData = null;
+
+    function showThemeFeedback(msg, isSuccess = true) {
+        if (!themeEditorFeedback) return;
+        themeEditorFeedback.textContent = msg;
+        themeEditorFeedback.className = `theme-feedback-banner ${isSuccess ? 'success' : 'error'}`;
+        themeEditorFeedback.classList.remove("hidden");
+        setTimeout(() => {
+            themeEditorFeedback.classList.add("hidden");
+        }, 6000);
+    }
+
+    async function loadThemes() {
+        if (!themePresetsContainer) return;
+        themePresetsContainer.innerHTML = "<div class='loading-state'>Fetching live themes from Jellyfin...</div>";
+
+        try {
+            const resp = await apiFetch("/api/themes");
+            const data = await resp.json();
+            loadedThemesData = data;
+
+            // Update Header status
+            if (themeActiveBadge) {
+                const activeP = (data.presets || []).find(p => p.id === data.active_preset_id);
+                const activeName = activeP ? activeP.name : (data.active_preset_id || (data.active_css ? "Custom CSS" : "Vanilla Stock"));
+                themeActiveBadge.textContent = activeName;
+            }
+
+            if (btnOpenJellyfinLink && data.jellyfin_url) {
+                btnOpenJellyfinLink.href = data.jellyfin_url;
+            }
+
+            // Populate Editor
+            if (themeCssEditor) {
+                themeCssEditor.value = data.active_css || "";
+            }
+
+            // Render Preset Cards
+            renderThemePresets(data.presets || [], data.active_preset_id);
+        } catch (err) {
+            console.error("Failed to load themes:", err);
+            themePresetsContainer.innerHTML = `<div class='error-state'>Failed to connect to Jellyfin theme service: ${escapeHtml(err.message)}</div>`;
+        }
+    }
+
+    function renderThemePresets(presets, activeId) {
+        if (!themePresetsContainer) return;
+        themePresetsContainer.innerHTML = "";
+
+        presets.forEach(p => {
+            const isActive = p.id === activeId;
+            const card = document.createElement("div");
+            card.className = `theme-preset-card ${isActive ? 'active' : ''}`;
+            card.innerHTML = `
+                <div class="theme-preview-banner" style="background: ${p.gradient || '#1e293b'};">
+                    <span class="theme-badge-pill">${escapeHtml(p.badge || 'Skin')}</span>
+                </div>
+                <div class="theme-card-content">
+                    <div class="theme-card-title-row">
+                        <span class="theme-card-title">${escapeHtml(p.name)}</span>
+                        ${isActive ? '<span class="theme-active-indicator">ACTIVE</span>' : ''}
+                    </div>
+                    <p class="theme-card-desc">${escapeHtml(p.description)}</p>
+                    <div class="theme-card-actions">
+                        <button type="button" class="btn-apply-preset" data-id="${p.id}">
+                            <span>${isActive ? '✓ Currently Active' : '⚡ Apply Skin'}</span>
+                        </button>
+                        <button type="button" class="btn-preset-icon-action btn-edit-preset" data-id="${p.id}" title="Load code into live editor">
+                            <span>✏️</span>
+                        </button>
+                        ${p.is_custom ? `
+                            <button type="button" class="btn-preset-icon-action btn-delete-preset" data-id="${p.id}" title="Delete preset">
+                                <span>🗑️</span>
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+
+            // Apply Button
+            card.querySelector(".btn-apply-preset").addEventListener("click", () => {
+                applyThemeDirectly(p.css, p.id, p.name);
+            });
+
+            // Edit Button (loads into editor and scrolls down)
+            card.querySelector(".btn-edit-preset").addEventListener("click", () => {
+                if (themeCssEditor) {
+                    themeCssEditor.value = p.css;
+                    themeCssEditor.focus();
+                    themeCssEditor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    showThemeFeedback(`Loaded "${p.name}" into CSS editor. Click "Apply to Jellyfin Now" when ready to push changes.`);
+                }
+            });
+
+            // Delete Button for custom presets
+            const deleteBtn = card.querySelector(".btn-delete-preset");
+            if (deleteBtn) {
+                deleteBtn.addEventListener("click", async () => {
+                    if (confirm(`Delete custom preset "${p.name}"?`)) {
+                        await deleteCustomPreset(p.id);
+                    }
+                });
+            }
+
+            themePresetsContainer.appendChild(card);
+        });
+    }
+
+    async function applyThemeDirectly(css, presetId, presetName) {
+        try {
+            showThemeFeedback(`Applying "${presetName || 'skin'}" to Jellyfin...`);
+            const resp = await apiFetch("/api/themes/apply", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ css, preset_id: presetId })
+            });
+            const res = await resp.json();
+            if (res.success) {
+                showThemeFeedback(`✨ Skin "${presetName || 'Custom'}" applied successfully! Reload Jellyfin to view your new look.`);
+                loadThemes();
+            } else {
+                showThemeFeedback(`Failed to apply theme: ${res.error || 'Server rejected request'}`, false);
+            }
+        } catch (e) {
+            console.error("Apply theme error:", e);
+            showThemeFeedback(`Error applying theme: ${e.message}`, false);
+        }
+    }
+
+    async function deleteCustomPreset(presetId) {
+        try {
+            const resp = await apiFetch(`/api/themes/preset/${encodeURIComponent(presetId)}`, {
+                method: "DELETE"
+            });
+            const res = await resp.json();
+            if (res.success) {
+                showThemeFeedback("Preset deleted.");
+                loadThemes();
+            } else {
+                showThemeFeedback(res.error || "Failed to delete preset", false);
+            }
+        } catch (e) {
+            console.error("Delete preset error:", e);
+        }
+    }
+
+    if (btnRefreshThemes) {
+        btnRefreshThemes.addEventListener("click", () => {
+            loadThemes();
+        });
+    }
+
+    if (btnApplyCustomCss) {
+        btnApplyCustomCss.addEventListener("click", () => {
+            const css = themeCssEditor ? themeCssEditor.value : "";
+            applyThemeDirectly(css, null, "Custom Code");
+        });
+    }
+
+    if (btnRevertStockTheme) {
+        btnRevertStockTheme.addEventListener("click", () => {
+            if (confirm("Reset Jellyfin server theme to default Vanilla Stock? All custom CSS will be removed.")) {
+                applyThemeDirectly("", "vanilla", "Vanilla Stock Jellyfin");
+            }
+        });
+    }
+
+    if (btnSaveCustomPresetBtn) {
+        btnSaveCustomPresetBtn.addEventListener("click", async () => {
+            const name = prompt("Enter a name for this custom theme preset:");
+            if (!name || !name.trim()) return;
+            const css = themeCssEditor ? themeCssEditor.value : "";
+            const desc = prompt("Enter an optional short description:") || "Custom user theme.";
+
+            try {
+                const resp = await apiFetch("/api/themes/save-preset", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: name.trim(), css, description: desc.trim() })
+                });
+                const res = await resp.json();
+                if (res.success) {
+                    showThemeFeedback(`Preset "${name}" saved!`);
+                    loadThemes();
+                } else {
+                    alert(res.error || "Failed to save preset");
+                }
+            } catch (e) {
+                alert(`Error saving preset: ${e.message}`);
+            }
+        });
+    }
 
     // Server Status Check
     function checkServerStatus() {

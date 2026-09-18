@@ -19,6 +19,7 @@ from metadata import clean_filename, search_imdb, fetch_series_episodes, search_
 from processor import process_and_ingest, trigger_jellyfin_refresh
 from collections_manager import collections_mgr
 from directories_manager import directories_mgr
+from theme_manager import theme_mgr
 from watcher import watcher
 
 # Persistent Active Sessions Store
@@ -126,7 +127,9 @@ async def auth_middleware(request: web.Request, handler):
     admin_only_paths = (
         "/api/settings",
         "/api/directories/delete",
-        "/api/directories/create"
+        "/api/directories/create",
+        "/api/themes/apply",
+        "/api/themes/save-preset"
     )
     if request.method == "POST" and any(path == p or path.startswith(p + "/") for p in admin_only_paths):
         if not user.get("is_admin"):
@@ -554,7 +557,40 @@ async def watcher_toggle_handler(request):
 async def refresh_library_handler(request):
     loop = asyncio.get_event_loop()
     ok = await loop.run_in_executor(None, trigger_jellyfin_refresh)
-    return web.json_response({"success": ok})
+# --- Themes & Skins Endpoints ---
+@routes.get("/api/themes")
+async def get_themes_handler(request):
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, theme_mgr.get_theme_status)
+    return web.json_response(res)
+
+@routes.post("/api/themes/apply")
+async def apply_theme_handler(request):
+    data = await request.json()
+    css = data.get("css", "")
+    preset_id = data.get("preset_id")
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, theme_mgr.apply_theme, css, preset_id)
+    return web.json_response(res)
+
+@routes.post("/api/themes/save-preset")
+async def save_preset_handler(request):
+    data = await request.json()
+    name = data.get("name", "")
+    css = data.get("css", "")
+    desc = data.get("description", "")
+    if not name or not name.strip():
+        return web.json_response({"success": False, "error": "Preset name is required"}, status=400)
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, theme_mgr.save_custom_preset, name, css, desc)
+    return web.json_response(res)
+
+@routes.delete("/api/themes/preset/{id}")
+async def delete_preset_handler(request):
+    preset_id = request.match_info.get("id")
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, theme_mgr.delete_custom_preset, preset_id)
+    return web.json_response(res)
 
 # --- Settings & Transportability Endpoints ---
 @routes.get("/api/settings")

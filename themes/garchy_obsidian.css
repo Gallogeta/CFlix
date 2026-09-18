@@ -1,0 +1,733 @@
+/* Auto-styled by Jellyfin Collection Fixer: Grey out missing items marked (Not Available) */
+.card:has([title*="Not Available"]),
+.card:has([aria-label*="Not Available"]),
+.card:has(.cardTextTitle[title*="Not Available"]),
+.card[title*="Not Available"],
+.card[aria-label*="Not Available"],
+.card[data-itemname*="Not Available"] {
+    opacity: 0.42 !important;
+    filter: grayscale(100%) contrast(90%) !important;
+    transition: opacity 0.2s ease, filter 0.2s ease !important;
+}
+
+.card:has([title*="Not Available"]):hover,
+.card:has([aria-label*="Not Available"]):hover,
+.card[title*="Not Available"]:hover,
+.card[aria-label*="Not Available"]:hover {
+    opacity: 0.78 !important;
+    filter: grayscale(35%) contrast(100%) !important;
+}
+
+/* Badge for (Not Available) */
+.card:has([title*="Not Available"]) .cardImageContainer::after,
+.card:has([aria-label*="Not Available"]) .cardImageContainer::after,
+.card[title*="Not Available"] .cardImageContainer::after,
+.card[aria-label*="Not Available"] .cardImageContainer::after {
+    content: "NOT AVAILABLE";
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(225, 29, 72, 0.92);
+    color: #ffffff;
+    font-size: 0.65rem;
+    font-weight: 800;
+    padding: 2px 7px;
+    border-radius: 4px;
+    letter-spacing: 0.6px;
+    z-index: 3;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+}
+
+/* ==========================================================================
+   GARCHY OS CLEANFLIX THEME and LOGIN STYLING
+   Strict 5-Color System:
+   1. Light Blue: #38bdf8 / #7dd3fc (Borders, active highlights, icons, halos)
+   2. Blue: #3b82f6 / #1d4ed8 (Button halos, gradients, secondary accents)
+   3. Golden: #fbbf24 / #fde047 (Clock borders, cores, Cleanflix accent, stars)
+   4. Light Grey: #e2e8f0 / #cbd5e1 (Crisp typography, active labels)
+   5. Dark Grey: #0a0f1d / #131c31 / #1e293b (Obsidian glass surfaces)
+   ========================================================================== */
+
+/* --- 1. HIDE DEFAULT JELLYFIN BRANDING and WATERMARKS --- */
+.splashLogo,
+.pageTitleWithLogo,
+.headerLogo,
+.adminDrawerLogo,
+.visualHeaders,
+img[src*="banner-light"],
+img[src*="icon-transparent"],
+img[src*="logo"],
+#loginPage .sectionTitle {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+#loginPage .visualLoginForm h1 {
+    display: none !important;
+}
+
+/* --- 2. CLEANFLIX LOGO BADGE --- */
+#cleanflix-brand-header {
+    text-align: center;
+    margin: 0 auto 1.4rem auto;
+    user-select: none;
+}
+
+.cleanflix-title-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.cf-word-clean {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 2.7rem;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    color: #e2e8f0;
+    text-shadow: 0 0 20px rgba(56, 189, 248, 0.65), 0 0 35px rgba(56, 189, 248, 0.35);
+}
+
+.cf-word-flix {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 2.7rem;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    color: #fbbf24;
+    text-shadow: 0 0 20px rgba(251, 191, 36, 0.75), 0 0 35px rgba(245, 158, 11, 0.45);
+    margin-left: 0.05em;
+}
+
+.cf-subtitle {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.35em;
+    text-indent: 0.35em;
+    color: #7dd3fc;
+    margin-top: 0.4rem;
+    text-transform: uppercase;
+    opacity: 0.9;
+}
+
+/* Header Brand Wordmark */
+.cleanflix-header-brand {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 1.35rem;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+}
+.cleanflix-header-brand .cf-clean {
+    color: #e2e8f0;
+    text-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+}
+.cleanflix-header-brand .cf-flix {
+    color: #fbbf24;
+    text-shadow: 0 0 10px rgba(251, 191, 36, 0.6);
+}
+
+/* --- 3. UNIVERSAL and MOBILE-FRIENDLY LOGIN PAGE LAYOUT --- */
+/* Strictly hide #loginPage when inactive */
+#loginPage.hide,
+div#loginPage.hide,
+.page.hide#loginPage {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    z-index: -9999 !important;
+}
+
+/* Only display when active */
+#loginPage:not(.hide) {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 2rem 1.25rem !important;
+    margin: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    background: radial-gradient(circle at 50% 35%, #131c31 0%, #0a0f1d 72%, #05070e 100%) !important;
+}
+
+/* Ambient glow orbs */
+#loginPage:not(.hide)::before {
+    content: "";
+    position: fixed;
+    top: -15%;
+    left: -10%;
+    width: 55vw;
+    height: 55vw;
+    background: radial-gradient(circle, rgba(56, 189, 248, 0.12) 0%, transparent 65%);
+    pointer-events: none;
+    z-index: 1;
+    filter: blur(40px);
+}
+#loginPage:not(.hide)::after {
+    content: "";
+    position: fixed;
+    bottom: -15%;
+    right: -10%;
+    width: 55vw;
+    height: 55vw;
+    background: radial-gradient(circle, rgba(251, 191, 36, 0.08) 0%, transparent 65%);
+    pointer-events: none;
+    z-index: 1;
+    filter: blur(50px);
+}
+
+/* Centered Obsidian Glass Login Card */
+#loginPage:not(.hide) .padded-bottom-page {
+    position: relative !important;
+    z-index: 10 !important;
+    max-width: 440px !important;
+    width: 100% !important;
+    margin: auto !important;
+    padding: 2.2rem 2rem 1.8rem 2rem !important;
+    box-sizing: border-box !important;
+    background: rgba(10, 15, 29, 0.82) !important;
+    backdrop-filter: blur(28px) saturate(170%) !important;
+    -webkit-backdrop-filter: blur(28px) saturate(170%) !important;
+    border: 1px solid rgba(56, 189, 248, 0.28) !important;
+    border-radius: 20px !important;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85),
+                0 0 35px rgba(56, 189, 248, 0.18),
+                inset 0 1px 1px rgba(255, 255, 255, 0.12) !important;
+    transition: transform 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+#loginPage:not(.hide) .padded-bottom-page:hover {
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.9),
+                0 0 45px rgba(56, 189, 248, 0.28),
+                inset 0 1px 1px rgba(255, 255, 255, 0.15) !important;
+    border-color: rgba(56, 189, 248, 0.42) !important;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 520px) {
+    #loginPage:not(.hide) {
+        padding: 1.25rem 0.85rem !important;
+        justify-content: center !important;
+    }
+    #loginPage:not(.hide) .padded-bottom-page {
+        padding: 1.6rem 1.25rem 1.4rem 1.25rem !important;
+        max-width: 100% !important;
+        border-radius: 16px !important;
+    }
+    .cf-word-clean, .cf-word-flix {
+        font-size: 2.2rem !important;
+    }
+    .cf-subtitle {
+        font-size: 0.65rem !important;
+        letter-spacing: 0.25em !important;
+        margin-top: 0.35rem !important;
+    }
+    #cleanflix-brand-header {
+        margin: 0 auto 1.1rem auto !important;
+    }
+    .emby-input {
+        padding: 0.75rem 0.9rem !important;
+        font-size: 0.95rem !important;
+    }
+    .button-submit,
+    .raised.button-submit,
+    .emby-button.btnManual {
+        padding: 0.75rem 1.2rem !important;
+        font-size: 0.95rem !important;
+    }
+}
+
+/* Compact Landscape Viewports */
+@media (max-height: 620px) {
+    #loginPage:not(.hide) {
+        justify-content: flex-start !important;
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+    }
+    #loginPage:not(.hide) .padded-bottom-page {
+        margin: 0.8rem auto !important;
+        padding: 1.2rem 1.5rem !important;
+    }
+    #cleanflix-brand-header {
+        margin-bottom: 0.8rem !important;
+    }
+    .cf-word-clean, .cf-word-flix {
+        font-size: 1.8rem !important;
+    }
+}
+
+/* --- 4. POST-LOGIN CINEMATIC SPLASH VIDEO OVERLAY --- */
+#cleanflix-splash-overlay {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    width: 100dvw !important;
+    height: 100dvh !important;
+    z-index: 999999 !important;
+    background: #000000 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    opacity: 1;
+    transition: opacity 0.65s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    pointer-events: auto !important;
+    overflow: hidden !important;
+}
+
+#cleanflix-splash-video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    display: block !important;
+}
+
+#cleanflix-splash-brand {
+    position: absolute !important;
+    top: 28px !important;
+    left: 32px !important;
+    z-index: 1000000 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    font-size: 1.3rem !important;
+    font-weight: 900 !important;
+    letter-spacing: 0.15em !important;
+    user-select: none !important;
+    pointer-events: none !important;
+    text-shadow: 0 0 15px rgba(0, 0, 0, 0.8) !important;
+}
+#cleanflix-splash-brand .cf-clean {
+    color: #e2e8f0 !important;
+    text-shadow: 0 0 10px rgba(56, 189, 248, 0.6) !important;
+}
+#cleanflix-splash-brand .cf-flix {
+    color: #fbbf24 !important;
+    text-shadow: 0 0 10px rgba(251, 191, 36, 0.7) !important;
+}
+
+#cleanflix-skip-btn {
+    position: absolute !important;
+    bottom: 30px !important;
+    right: 32px !important;
+    z-index: 1000000 !important;
+    background: rgba(10, 15, 29, 0.75) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    border: 1px solid rgba(56, 189, 248, 0.4) !important;
+    border-radius: 25px !important;
+    color: #e2e8f0 !important;
+    padding: 8px 22px !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    font-size: 0.9rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    cursor: pointer !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 15px rgba(56, 189, 248, 0.25) !important;
+    transition: all 0.25s ease !important;
+}
+
+#cleanflix-skip-btn:hover {
+    background: rgba(30, 41, 59, 0.9) !important;
+    border-color: #fbbf24 !important;
+    color: #fbbf24 !important;
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 25px rgba(251, 191, 36, 0.4) !important;
+}
+
+@media (max-width: 520px) {
+    #cleanflix-splash-brand {
+        top: 18px !important;
+        left: 20px !important;
+        font-size: 1.1rem !important;
+    }
+    #cleanflix-skip-btn {
+        bottom: 20px !important;
+        right: 20px !important;
+        padding: 6px 16px !important;
+        font-size: 0.82rem !important;
+    }
+}
+
+/* --- 5. INPUTS and FORM CONTROLS --- */
+.inputContainer {
+    margin-bottom: 1.3rem !important;
+}
+
+.emby-input {
+    background: rgba(19, 28, 49, 0.75) !important;
+    border: 1px solid rgba(56, 189, 248, 0.22) !important;
+    border-radius: 10px !important;
+    color: #e2e8f0 !important;
+    font-size: 1rem !important;
+    padding: 0.8rem 1rem !important;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+    transition: all 0.25s ease !important;
+}
+
+.emby-input:focus {
+    background: rgba(19, 28, 49, 0.95) !important;
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.45),
+                inset 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+    color: #ffffff !important;
+    outline: none !important;
+}
+
+.inputLabel,
+.inputLabelFocused {
+    color: #cbd5e1 !important;
+    font-weight: 600 !important;
+    font-size: 0.9rem !important;
+    letter-spacing: 0.04em !important;
+}
+
+.inputLabelFocused {
+    color: #38bdf8 !important;
+    text-shadow: 0 0 8px rgba(56, 189, 248, 0.5) !important;
+}
+
+.checkboxContainer {
+    display: flex !important;
+    align-items: center !important;
+    color: #cbd5e1 !important;
+    font-size: 0.9rem !important;
+    margin: 1rem 0 !important;
+}
+
+.emby-checkbox:checked + span::before,
+.checkboxOutline {
+    border-color: #38bdf8 !important;
+    background-color: rgba(56, 189, 248, 0.15) !important;
+}
+
+.emby-checkbox:checked + span .checkboxIcon {
+    color: #fbbf24 !important;
+}
+
+/* --- 6. BUTTONS and ACTIONS (GARCHY DUAL-RING and HALOS) --- */
+.button-submit,
+.raised.button-submit,
+.emby-button.btnManual {
+    background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 50%, #38bdf8 100%) !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    border: 1px solid rgba(56, 189, 248, 0.6) !important;
+    border-radius: 12px !important;
+    padding: 0.85rem 1.5rem !important;
+    box-shadow: 0 4px 18px rgba(29, 78, 216, 0.5),
+                0 0 20px rgba(56, 189, 248, 0.3) !important;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.button-submit:hover,
+.raised.button-submit:hover,
+.emby-button.btnManual:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #38bdf8 100%) !important;
+    border-color: #fbbf24 !important;
+    box-shadow: 0 6px 24px rgba(56, 189, 248, 0.6),
+                0 0 22px rgba(251, 191, 36, 0.4) !important;
+    transform: translateY(-2px) scale(1.01) !important;
+    color: #ffffff !important;
+}
+
+.emby-button.cancel,
+.emby-button.btnForgotPassword,
+.emby-button.btnSelectServer,
+.emby-button.btnCancel {
+    background: rgba(19, 28, 49, 0.6) !important;
+    backdrop-filter: blur(10px) !important;
+    border: 1px solid rgba(203, 213, 225, 0.16) !important;
+    color: #cbd5e1 !important;
+    border-radius: 10px !important;
+    padding: 0.7rem 1.2rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.04em !important;
+    transition: all 0.2s ease !important;
+}
+
+.emby-button.cancel:hover,
+.emby-button.btnForgotPassword:hover,
+.emby-button.btnSelectServer:hover,
+.emby-button.btnCancel:hover {
+    background: rgba(30, 41, 59, 0.8) !important;
+    border-color: #38bdf8 !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 14px rgba(56, 189, 248, 0.3) !important;
+    transform: translateY(-1px) !important;
+}
+
+#divUsers .card {
+    background: rgba(19, 28, 49, 0.7) !important;
+    border: 1px solid rgba(56, 189, 248, 0.25) !important;
+    border-radius: 16px !important;
+    padding: 1rem !important;
+    transition: all 0.3s ease !important;
+}
+
+#divUsers .card:hover {
+    border-color: #fbbf24 !important;
+    box-shadow: 0 0 22px rgba(251, 191, 36, 0.35),
+                0 0 35px rgba(56, 189, 248, 0.25) !important;
+    transform: translateY(-4px) scale(1.04) !important;
+}
+
+#divUsers .cardPadder-square {
+    border-radius: 50% !important;
+    border: 2px solid #38bdf8 !important;
+    overflow: hidden !important;
+    box-shadow: 0 0 15px rgba(56, 189, 248, 0.4) !important;
+}
+
+.loginDisclaimer {
+    color: #cbd5e1 !important;
+    font-size: 0.8rem !important;
+    opacity: 0.75 !important;
+    text-align: center !important;
+    margin-top: 1.5rem !important;
+}
+
+/* --- 7. GENERAL JELLYFIN THEMING and OBSIDIAN SURFACES --- */
+html, body {
+    background-color: #0a0f1d !important;
+    color: #e2e8f0 !important;
+}
+
+.backgroundContainer {
+    background-color: #0a0f1d !important;
+}
+
+.skinHeader {
+    background: rgba(10, 15, 29, 0.85) !important;
+    backdrop-filter: blur(20px) saturate(160%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(160%) !important;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.18) !important;
+    box-shadow: 0 4px 25px rgba(0, 0, 0, 0.6) !important;
+}
+
+.skinHeader .headerButton {
+    color: #cbd5e1 !important;
+    transition: all 0.2s ease !important;
+}
+
+.skinHeader .headerButton:hover {
+    color: #38bdf8 !important;
+    text-shadow: 0 0 10px rgba(56, 189, 248, 0.6) !important;
+}
+
+.mainDrawer,
+.drawerContent {
+    background: rgba(10, 15, 29, 0.94) !important;
+    backdrop-filter: blur(24px) saturate(170%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(170%) !important;
+    border-right: 1px solid rgba(56, 189, 248, 0.2) !important;
+    box-shadow: 5px 0 30px rgba(0, 0, 0, 0.7) !important;
+}
+
+.navMenuOption {
+    border-radius: 10px !important;
+    margin: 0.25rem 0.6rem !important;
+    color: #cbd5e1 !important;
+    transition: all 0.2s ease !important;
+}
+
+.navMenuOption:hover {
+    background: rgba(56, 189, 248, 0.12) !important;
+    color: #38bdf8 !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.18) !important;
+}
+
+.navMenuOption-selected {
+    background: rgba(56, 189, 248, 0.18) !important;
+    border-left: 3px solid #38bdf8 !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+}
+
+.navMenuOptionIcon {
+    color: #38bdf8 !important;
+}
+
+.card {
+    border-radius: 12px !important;
+    box-shadow: none !important;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.2s ease !important;
+}
+
+.cardBox {
+    background: rgba(19, 28, 49, 0.65) !important;
+    border: 1px solid rgba(56, 189, 248, 0.16) !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+    box-shadow: 0 1px 3px -1px rgba(0, 0, 0, 0.3) !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* Eliminate default Jellyfin dark mask on hover */
+.cardOverlayContainer,
+.card-hoverable:hover .cardOverlayContainer,
+.card-hoverable:focus-within .cardOverlayContainer,
+.card:hover .cardOverlayContainer,
+.cardBox:hover .cardOverlayContainer {
+    background: transparent !important;
+    background-color: transparent !important;
+}
+
+/* Eliminate wide padder/content shadows so nothing bleeds into neighbours */
+.cardPadder,
+.cardContent-shadow,
+.cardBox:not(.visualCardBox) .cardPadder {
+    box-shadow: none !important;
+}
+
+/* Highlight card poster on hover: No darkening, boost brightness and contrast */
+.card:not([title*="Not Available"]):not(:has([title*="Not Available"])):hover .cardImageContainer,
+.card:not([title*="Not Available"]):not(:has([title*="Not Available"])):hover .cardImage,
+.card:not([title*="Not Available"]):not(:has([title*="Not Available"])):hover .innerCardContainer {
+    filter: brightness(1.08) contrast(1.02) !important;
+    transition: filter 0.2s ease !important;
+}
+
+/* Crisp neon rim highlight on hover */
+.card:hover .cardBox {
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.45), inset 0 0 6px rgba(56, 189, 248, 0.18) !important;
+}
+
+/* Card hover lift with minimal, ultra-tight drop shadow (zero spill to neighbor cards) */
+.card:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 2px 4px -2px rgba(0, 0, 0, 0.35) !important;
+    z-index: 5 !important;
+}
+
+.cardImageContainer {
+    border-radius: 11px !important;
+}
+
+.cardTextTitle {
+    color: #e2e8f0 !important;
+    font-weight: 600 !important;
+    transition: color 0.2s ease, text-shadow 0.2s ease !important;
+}
+
+.card:hover .cardTextTitle {
+    color: #38bdf8 !important;
+    text-shadow: 0 0 10px rgba(56, 189, 248, 0.6) !important;
+}
+
+/* Card Overlay Play/Action Buttons (Cleanflix Cyan and Gold accents) */
+.cardOverlayFab-primary {
+    background-color: rgba(56, 189, 248, 0.9) !important;
+    color: #0a0f1d !important;
+    box-shadow: 0 0 14px rgba(56, 189, 248, 0.6) !important;
+    transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+.cardOverlayFab-primary:hover {
+    background-color: #fbbf24 !important;
+    color: #0a0f1d !important;
+    box-shadow: 0 0 20px rgba(251, 191, 36, 0.8) !important;
+    transform: scale(1.15) !important;
+}
+
+.cardOverlayButtonIcon {
+    background-color: rgba(10, 15, 29, 0.75) !important;
+    color: #cbd5e1 !important;
+    border: 1px solid rgba(56, 189, 248, 0.25) !important;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4) !important;
+    transition: all 0.2s ease !important;
+}
+
+.cardOverlayButtonIcon:hover {
+    color: #38bdf8 !important;
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5) !important;
+}
+
+.cardText-secondary {
+    color: #94a3b8 !important;
+}
+
+.cardIndicators .indicator {
+    background: #3b82f6 !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.6) !important;
+    border-radius: 6px !important;
+}
+
+.starIcon,
+.ratingStar {
+    color: #fbbf24 !important;
+    text-shadow: 0 0 8px rgba(251, 191, 36, 0.7) !important;
+}
+
+.itemProgressBar {
+    background: rgba(255, 255, 255, 0.15) !important;
+    border-radius: 4px !important;
+    height: 5px !important;
+}
+
+.itemProgressBarForeground {
+    background: linear-gradient(90deg, #3b82f6, #38bdf8) !important;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.7) !important;
+    border-radius: 4px !important;
+}
+
+.playbackProgress .sliderBubble,
+.mdl-slider-background-lower {
+    background-color: #38bdf8 !important;
+}
+
+.mdl-slider::-webkit-slider-thumb {
+    background-color: #fbbf24 !important;
+    box-shadow: 0 0 12px rgba(251, 191, 36, 0.8) !important;
+}
+
+.dialog,
+.actionSheet {
+    background: rgba(10, 15, 29, 0.92) !important;
+    backdrop-filter: blur(28px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
+    border: 1px solid rgba(56, 189, 248, 0.28) !important;
+    border-radius: 18px !important;
+    box-shadow: 0 25px 65px rgba(0, 0, 0, 0.9),
+                0 0 35px rgba(56, 189, 248, 0.2) !important;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #0a0f1d;
+}
+::-webkit-scrollbar-thumb {
+    background: #1e293b;
+    border-radius: 4px;
+    border: 1px solid rgba(56, 189, 248, 0.15);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+}
