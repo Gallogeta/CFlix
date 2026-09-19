@@ -24,6 +24,15 @@ if os.path.exists(GARCHY_CSS_FILE):
     except Exception as e:
         emit_log(f"Warning: Could not read {GARCHY_CSS_FILE}: {e}")
 
+MONOCHROME_CSS_FILE = os.path.join(os.path.dirname(__file__), "themes", "monochrome_square.css")
+MONOCHROME_SQUARE_CSS = ""
+if os.path.exists(MONOCHROME_CSS_FILE):
+    try:
+        with open(MONOCHROME_CSS_FILE, "r", encoding="utf-8") as f:
+            MONOCHROME_SQUARE_CSS = f.read()
+    except Exception as e:
+        emit_log(f"Warning: Could not read {MONOCHROME_CSS_FILE}: {e}")
+
 if not GARCHY_OBSIDIAN_CSS:
     GARCHY_OBSIDIAN_CSS = """/* --- Garchy OS Obsidian Glass Jellyfin Theme --- */
 :root {
@@ -70,6 +79,15 @@ body, .backgroundContainer {
 """
 
 BUILTIN_PRESETS: List[Dict[str, Any]] = [
+    {
+        "id": "monochrome_square",
+        "name": "Monochrome Modern Square",
+        "description": "Architectural monochrome aesthetic: deep obsidian blacks, pure white accents, strictly 100% square borders, and high-contrast hover transitions.",
+        "badge": "Modern Square",
+        "accent": "#ffffff",
+        "gradient": "linear-gradient(135deg, #050505 0%, #1c1c1c 50%, #ffffff 100%)",
+        "css": MONOCHROME_SQUARE_CSS
+    },
     {
         "id": "garchy_obsidian",
         "name": "Garchy OS Obsidian Glass",
