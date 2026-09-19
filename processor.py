@@ -97,7 +97,9 @@ def process_and_ingest(
 
     if is_series_format:
         cat = "anime" if is_anime else "series"
-        alloc_cat = custom_dir if custom_dir else cat
+        alloc_cat = cat
+        if custom_dir and any(w in custom_dir.lower() for w in ["series", "show", "tv", "anime"]):
+            alloc_cat = custom_dir
         dest_base = directories_mgr.smart_allocate_path(
             category_or_library=alloc_cat,
             required_bytes=src_size,

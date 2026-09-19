@@ -527,36 +527,27 @@ class DirectoriesManager:
         If title belongs to an existing series, keeps episodes together if space permits.
         """
         lib_key = (category_or_library or "").lower().strip()
-        
-        mapping = {
-            "movies": [get_movies_dir() or "/mnt/media_ssd/jellyfin", "/mnt/media_ssd2/movies"],
-            "movie": [get_movies_dir() or "/mnt/media_ssd/jellyfin", "/mnt/media_ssd2/movies"],
-            "jellyfin": [get_movies_dir() or "/mnt/media_ssd/jellyfin", "/mnt/media_ssd2/movies"],
-            "series": [get_series_dir() or "/mnt/media_ssd/jellyfin_series", "/mnt/media_ssd2/jellyfin_series"],
-            "shows": [get_series_dir() or "/mnt/media_ssd/jellyfin_series", "/mnt/media_ssd2/jellyfin_series"],
-            "tv": [get_series_dir() or "/mnt/media_ssd/jellyfin_series", "/mnt/media_ssd2/jellyfin_series"],
-            "jellyfin_series": [get_series_dir() or "/mnt/media_ssd/jellyfin_series", "/mnt/media_ssd2/jellyfin_series"],
-            "anime": [get_anime_dir() or "/mnt/media_ssd/Anime", "/mnt/media_ssd2/Anime"],
-            "adult": [get_adult_dir() or "/mnt/media_ssd/Adult", "/mnt/media_ssd2/Adult"],
-            "children": ["/mnt/media_ssd/Children", "/mnt/media_ssd2/Children"],
-            "eesti filmid": ["/mnt/media_ssd/Eesti filmid", "/mnt/media_ssd2/Eesti filmid"],
-            "eesti_filmid": ["/mnt/media_ssd/Eesti filmid", "/mnt/media_ssd2/Eesti filmid"]
-        }
 
-        candidates = None
-        for k, v in mapping.items():
-            if k == lib_key or k in lib_key:
-                candidates = list(v)
-                break
-
-        if not candidates:
-            if os.path.isabs(category_or_library) and os.path.exists(category_or_library):
-                if "/mnt/media_ssd2" in category_or_library:
-                    return category_or_library
-                basename = os.path.basename(category_or_library.rstrip("/"))
-                candidates = [category_or_library, f"/mnt/media_ssd2/{basename}"]
-            else:
-                candidates = [get_movies_dir() or "/mnt/media_ssd/jellyfin", "/mnt/media_ssd2/movies"]
+        # Prioritize explicit library matching without substring collision
+        if any(w in lib_key for w in ["jellyfin_series", "series", "show", "tv"]):
+            candidates = [get_series_dir() or "/mnt/media_ssd/jellyfin_series", "/mnt/media_ssd2/jellyfin_series"]
+        elif "anime" in lib_key:
+            candidates = [get_anime_dir() or "/mnt/media_ssd/Anime", "/mnt/media_ssd2/Anime"]
+        elif "adult" in lib_key:
+            candidates = [get_adult_dir() or "/mnt/media_ssd/Adult", "/mnt/media_ssd2/Adult"]
+        elif "children" in lib_key:
+            candidates = ["/mnt/media_ssd/Children", "/mnt/media_ssd2/Children"]
+        elif "eesti" in lib_key:
+            candidates = ["/mnt/media_ssd/Eesti filmid", "/mnt/media_ssd2/Eesti filmid"]
+        elif any(w in lib_key for w in ["movie", "film"]) or lib_key.rstrip("/").endswith("/jellyfin") or lib_key == "jellyfin":
+            candidates = [get_movies_dir() or "/mnt/media_ssd/jellyfin", "/mnt/media_ssd2/movies"]
+        elif os.path.isabs(category_or_library) and os.path.exists(category_or_library):
+            if "/mnt/media_ssd2" in category_or_library:
+                return category_or_library
+            basename = os.path.basename(category_or_library.rstrip("/"))
+            candidates = [category_or_library, f"/mnt/media_ssd2/{basename}"]
+        else:
+            candidates = [get_movies_dir() or "/mnt/media_ssd/jellyfin", "/mnt/media_ssd2/movies"]
 
         primary_path = candidates[0]
         expansion_path = candidates[1] if len(candidates) > 1 else primary_path
