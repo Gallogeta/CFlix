@@ -503,7 +503,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             directoriesTableBody.appendChild(tr);
         });
-    }
+
         // Attach delete listeners
         document.querySelectorAll(".btn-delete-dir").forEach(btn => {
             btn.addEventListener("click", async () => {
