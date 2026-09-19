@@ -81,8 +81,20 @@ flowchart LR
   * **Unauthorized Users**: Access is strictly denied with HTTP 401/403.
 * Hardened security stack: HTTPOnly and SameSite session cookies, brute-force rate limiting, and security headers (`nosniff`, `SAMEORIGIN`).
 
-### 6. 📊 Real-Time Live Activity Console
-* Live Server-Sent Events (SSE) stream terminal logs directly to the browser dashboard, providing instant visibility into FFmpeg operations, file movements, and API responses.
+### 6. 💾 Smart Multi-SSD Auto-Overflow Storage Manager
+* **Multi-Drive Pooling**: Seamlessly pools storage across multiple SSDs/HDDs (e.g. Primary `/mnt/media_ssd` and Expansion `/mnt/media_ssd2`).
+* **Auto-Overflow Routing**: Automatically routes new movie and episode uploads to expansion drives when the primary SSD drops below a user-configurable free space threshold (e.g., 50GB / 150GB or 95% full).
+* **Episode Clustering**: Intelligently inspects disk contents and clusters new TV show episodes onto the drive where prior seasons/episodes already reside as long as safe headroom exists.
+* **Unified Library Views**: Merges multi-disk storage paths into single logical Jellyfin library targets (Movies, TV Series, Anime, Adult, Children, Regional) while filtering out unused non-media directories (`kavita`, `manga`, `boost`, `books`, `comics`).
+
+### 7. 🎨 On-The-Fly Theme & Skin Engine
+* **Instant CSS Injection**: Switch Jellyfin themes or inject custom stylesheets directly across all connected clients with zero server downtime.
+* **Curated Skin Presets**: Includes Modern Monochromic, Obsidian Glass, Cyberpunk Neon, and Classic Dark presets.
+* **Live CSS Code Editor**: Live syntax-ready code editor for testing, tweaking, and persisting custom styles and Google Fonts directly into Jellyfin.
+
+### 8. 📊 Real-Time Live Activity Console & Multi-Disk Dashboard
+* **SSE Live Stream**: Real-time Server-Sent Events (SSE) broadcast active FFmpeg tagging, moves, and watcher operations to the UI console.
+* **Multi-Disk Storage Telemetry**: Real-time storage overview tracking capacity, utilized space, and remaining headroom across all host mounts and media drives.
 
 ---
 
@@ -167,9 +179,11 @@ http://<your-server-ip>:8090
 ├── processor.py             # Ingestion pipeline & FFmpeg tagging runner
 ├── metadata.py              # IMDb & MyAnimeList search & title sanitization
 ├── collections_manager.py   # TMDb BoxSets, franchise ordering & missing item synchronizer
-├── directories_manager.py   # Multi-library & storage directory management
+├── theme_manager.py         # On-the-fly Jellyfin CSS injection & preset switcher
+├── directories_manager.py   # Multi-library & Smart Multi-SSD storage manager
 ├── watcher.py               # Background downloads folder monitoring daemon
 ├── logger.py                # Thread-safe logging & Server-Sent Events (SSE) broadcaster
+├── themes/                  # Curated Jellyfin theme stylesheets and presets
 ├── templates/
 │   └── index.html           # High-performance glassmorphism UI dashboard
 ├── static/
