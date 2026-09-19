@@ -586,6 +586,26 @@
                                 <input type="text" id="input-watch-dir" class="text-input" placeholder="/downloads">
                             </div>
 
+                            <!-- Smart Multi-SSD Auto-Overflow Policy -->
+                            <div class="overflow-settings-box">
+                                <div class="label-with-badge">
+                                    <label class="input-label">Smart Storage Auto-Overflow</label>
+                                    <span class="path-badge valid" id="badge-overflow-status">⚡ Active (Auto-Routes when Full)</span>
+                                </div>
+                                <p class="sub-caption">When Primary SSD drops below this free space threshold, new uploads automatically overflow to Expansion SSD (<code>/mnt/media_ssd2</code>):</p>
+                                <div class="overflow-row">
+                                    <select id="cfg-overflow-min-gb" class="text-input select-input" style="max-width: 280px;">
+                                        <option value="50">50 GB Free (Fill SSD1 first)</option>
+                                        <option value="100">100 GB Free (Balanced safety buffer)</option>
+                                        <option value="150">150 GB Free (Start routing to SSD2 now)</option>
+                                        <option value="300">300 GB Free (Aggressive overflow)</option>
+                                    </select>
+                                    <button type="button" class="btn-secondary btn-sm" id="btn-force-overflow" title="Set threshold to 150GB to start routing new uploads to SSD2 immediately">
+                                        <span>⚡ Route to SSD2 Now (150GB)</span>
+                                    </button>
+                                </div>
+                            </div>
+
                             <div class="path-actions-row">
                                 <button type="button" class="btn-primary btn-sm btn-autofix" id="btn-autofix-paths" title="Auto-detect real media folders across all storage drives and fix broken or default paths">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>

@@ -41,7 +41,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "STAGING_DIR": os.environ.get("STAGING_DIR", "/downloads/.staging"),
     "UPLOAD_TMP_DIR": os.environ.get("UPLOAD_TMP_DIR", "/tmp/cfmm_uploads"),
     "WATCHER_ENABLED": os.environ.get("WATCHER_ENABLED", "true").lower() == "true",
-    "WATCHER_INTERVAL": int(os.environ.get("WATCHER_INTERVAL", 10))
+    "WATCHER_INTERVAL": int(os.environ.get("WATCHER_INTERVAL", 10)),
+    "AUTO_OVERFLOW_ENABLED": os.environ.get("AUTO_OVERFLOW_ENABLED", "true").lower() == "true",
+    "AUTO_OVERFLOW_MIN_GB": int(os.environ.get("AUTO_OVERFLOW_MIN_GB", 50))
 }
 
 class ConfigManager:
@@ -87,12 +89,12 @@ class ConfigManager:
         allowed_keys = set(DEFAULT_SETTINGS.keys())
         for k, v in new_settings.items():
             if k in allowed_keys:
-                if k in ("PORT", "WATCHER_INTERVAL"):
+                if k in ("PORT", "WATCHER_INTERVAL", "AUTO_OVERFLOW_MIN_GB"):
                     try:
                         self._settings[k] = int(v)
                     except (ValueError, TypeError):
                         pass
-                elif k in ("WATCHER_ENABLED",):
+                elif k in ("WATCHER_ENABLED", "AUTO_OVERFLOW_ENABLED"):
                     self._settings[k] = bool(v)
                 elif isinstance(v, str):
                     # Clean trailing slashes for paths and URLs

@@ -1198,6 +1198,29 @@ code {
     color: #fff;
 }
 
+.overflow-settings-box {
+    background: rgba(10, 15, 29, 0.45);
+    border: 1px solid rgba(56, 189, 248, 0.15);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-top: 14px;
+    margin-bottom: 14px;
+}
+
+.overflow-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.sub-caption {
+    font-size: 0.74rem;
+    color: var(--c-muted-grey);
+    margin-top: 2px;
+}
+
 .conn-test-row {
     display: flex;
     align-items: center;

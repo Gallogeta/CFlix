@@ -10,6 +10,7 @@ from config import (
     get_jellyfin_url, get_jellyfin_user, get_jellyfin_pass
 )
 from logger import emit_log
+from directories_manager import directories_mgr
 
 def sanitize_filename(name: str) -> str:
     # Replace invalid filesystem characters
@@ -92,13 +93,16 @@ def process_and_ingest(
         is_series_format = True
     else:
         is_series_format = False
+    src_size = os.path.getsize(src_file) if os.path.exists(src_file) else 0
+
     if is_series_format:
-        if custom_dir:
-            dest_base = custom_dir
-        elif target_category == "anime":
-            dest_base = get_anime_dir()
-        else:
-            dest_base = get_series_dir()
+        cat = "anime" if is_anime else "series"
+        alloc_cat = custom_dir if custom_dir else cat
+        dest_base = directories_mgr.smart_allocate_path(
+            category_or_library=alloc_cat,
+            required_bytes=src_size,
+            title=clean_title_str
+        )
 
         s_num = season if season is not None else 1
         e_num = episode if episode is not None else 1
@@ -113,26 +117,44 @@ def process_and_ingest(
         final_dir = os.path.dirname(final_dest)
         os.makedirs(final_dir, exist_ok=True)
     elif target_category == "anime":
-        dest_base = custom_dir if custom_dir else get_anime_dir()
+        dest_base = directories_mgr.smart_allocate_path(
+            category_or_library=custom_dir if custom_dir else "anime",
+            required_bytes=src_size,
+            title=clean_title_str
+        )
         os.makedirs(dest_base, exist_ok=True)
         year_str = f" ({year})" if year else ""
         filename = f"{clean_title_str}{year_str}.{ext}"
         final_dest = os.path.join(dest_base, filename)
 
     elif target_category == "adult":
-        dest_base = custom_dir if custom_dir else get_adult_dir()
+        dest_base = directories_mgr.smart_allocate_path(
+            category_or_library=custom_dir if custom_dir else "adult",
+            required_bytes=src_size,
+            title=clean_title_str
+        )
         os.makedirs(dest_base, exist_ok=True)
         filename = f"{clean_title_str}.{ext}"
         final_dest = os.path.join(dest_base, filename)
 
     elif target_category == "custom" and custom_dir:
-        os.makedirs(custom_dir, exist_ok=True)
+        dest_base = directories_mgr.smart_allocate_path(
+            category_or_library=custom_dir,
+            required_bytes=src_size,
+            title=clean_title_str
+        )
+        os.makedirs(dest_base, exist_ok=True)
         year_str = f" ({year})" if year else ""
         filename = f"{clean_title_str}{year_str}.{ext}"
-        final_dest = os.path.join(custom_dir, filename)
+        final_dest = os.path.join(dest_base, filename)
 
     else: # movies default
-        dest_base = custom_dir if custom_dir else get_movies_dir()
+        alloc_cat = custom_dir if custom_dir else (target_category or "movies")
+        dest_base = directories_mgr.smart_allocate_path(
+            category_or_library=alloc_cat,
+            required_bytes=src_size,
+            title=clean_title_str
+        )
         os.makedirs(dest_base, exist_ok=True)
         year_str = f" ({year})" if year else ""
         filename = f"{clean_title_str}{year_str}.{ext}"

@@ -390,21 +390,23 @@ document.addEventListener("DOMContentLoaded", () => {
         dynamicLibraryCards.innerHTML = "";
 
         if (mediaDirectories.length === 0) {
-            dynamicLibraryCards.innerHTML = "<div class='empty-state'>No directories found on SSD.</div>";
+            dynamicLibraryCards.innerHTML = "<div class='empty-state'>No directories found in Jellyfin.</div>";
             return;
         }
 
         mediaDirectories.forEach((d, idx) => {
             const isSelected = idx === 0;
-            const icon = getDirIcon(d);
+            const icon = d.icon || getDirIcon(d);
+            const storageTag = d.multi_drive ? "⚡ Smart Multi-SSD" : (d.locations && d.locations[0] ? d.locations[0].disk_name : "Storage");
+            const libValue = d.id || d.name;
 
             const label = document.createElement("label");
             label.className = `radio-card ${isSelected ? 'active' : ''}`;
             label.innerHTML = `
-                <input type="radio" name="target-library" value="${d.name}" data-path="${d.path}" data-type="${d.type}" ${isSelected ? 'checked' : ''}>
+                <input type="radio" name="target-library" value="${escapeHtml(libValue)}" data-id="${escapeHtml(d.id || '')}" data-name="${escapeHtml(d.name)}" data-path="${escapeHtml(d.path)}" data-type="${escapeHtml(d.type)}" ${isSelected ? 'checked' : ''}>
                 <div class="radio-content">
-                    <span class="radio-title">${icon} ${d.display_name}</span>
-                    <span class="radio-desc">${d.path}</span>
+                    <span class="radio-title">${icon} ${escapeHtml(d.display_name)}</span>
+                    <span class="radio-desc">${d.item_count} items • ${escapeHtml(storageTag)}</span>
                 </div>
             `;
 
@@ -432,29 +434,26 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!batchDynamicLibraryCards) return;
         batchDynamicLibraryCards.innerHTML = "";
 
-        if (mediaDirectories.length === 0) {
-            batchDynamicLibraryCards.innerHTML = "<div class='empty-state'>No directories found on SSD.</div>";
+        const seriesDirs = mediaDirectories.filter(d => d.type === "series");
+
+        if (seriesDirs.length === 0) {
+            batchDynamicLibraryCards.innerHTML = "<div class='empty-state'>No series libraries found in Jellyfin.</div>";
             return;
         }
 
-        // Put series directories first
-        const sortedDirs = [...mediaDirectories].sort((a, b) => {
-            if (a.type === "series" && b.type !== "series") return -1;
-            if (a.type !== "series" && b.type === "series") return 1;
-            return 0;
-        });
-
-        sortedDirs.forEach((d, idx) => {
+        seriesDirs.forEach((d, idx) => {
             const isSelected = idx === 0;
-            const icon = getDirIcon(d);
+            const icon = d.icon || getDirIcon(d);
+            const storageTag = d.multi_drive ? "⚡ Smart Multi-SSD" : (d.locations && d.locations[0] ? d.locations[0].disk_name : "Storage");
+            const libValue = d.id || d.name;
 
             const label = document.createElement("label");
             label.className = `radio-card ${isSelected ? 'active' : ''}`;
             label.innerHTML = `
-                <input type="radio" name="batch-target-library" value="${d.name}" data-path="${d.path}" data-type="${d.type}" ${isSelected ? 'checked' : ''}>
+                <input type="radio" name="batch-target-library" value="${escapeHtml(libValue)}" data-id="${escapeHtml(d.id || '')}" data-name="${escapeHtml(d.name)}" data-path="${escapeHtml(d.path)}" data-type="${escapeHtml(d.type)}" ${isSelected ? 'checked' : ''}>
                 <div class="radio-content">
-                    <span class="radio-title">${icon} ${d.display_name}</span>
-                    <span class="radio-desc">${d.path}</span>
+                    <span class="radio-title">${icon} ${escapeHtml(d.display_name)}</span>
+                    <span class="radio-desc">${d.item_count} shows • ${escapeHtml(storageTag)}</span>
                 </div>
             `;
 
@@ -480,30 +479,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
         mediaDirectories.forEach(d => {
             const tr = document.createElement("tr");
-            const icon = getDirIcon(d);
-            const typeLabel = d.type === "series" ? "TV Series" : "Movies";
+            const icon = d.icon || getDirIcon(d);
+            const typeLabel = d.type === "series" ? "TV Series" : (d.type === "adult" ? "Adult" : "Movies");
             const jfBadge = d.in_jellyfin ? 
                 "<span class='stat-tag stat-owned'>✔ Jellyfin Library</span>" : 
                 "<span class='stat-tag stat-missing'>Folder Only</span>";
 
-            const deleteAction = d.deletable ? `
-                <button type="button" class="btn-secondary btn-sm btn-delete-dir" data-name="${d.name}" data-path="${d.path}">
-                    🗑️ Delete
-                </button>
-            ` : `<span style="color: var(--c-muted-grey); font-size: 0.75rem;">Core Protected</span>`;
+            const storageBadge = d.multi_drive ?
+                `<div style="display:flex;flex-direction:column;gap:2px;">
+                    <span class="pill pill-blue" style="font-size:0.7rem;width:fit-content;">⚡ Smart Multi-SSD</span>
+                    <code style="font-size:0.72rem;">${d.locations.map(l => l.path).join(' + ')}</code>
+                </div>` :
+                `<code>${d.path}</code>`;
 
             tr.innerHTML = `
-                <td><strong>${icon} ${d.display_name}</strong></td>
+                <td><strong>${icon} ${escapeHtml(d.display_name)}</strong></td>
                 <td><span class="pill ${d.type === 'series' ? 'pill-gold' : 'pill-blue'}">${typeLabel}</span></td>
-                <td><code>${d.path}</code></td>
+                <td>${storageBadge}</td>
                 <td>${d.item_count} items</td>
                 <td>${jfBadge}</td>
-                <td>${deleteAction}</td>
+                <td><span style="color: var(--c-muted-grey); font-size: 0.75rem;">Core Protected</span></td>
             `;
 
             directoriesTableBody.appendChild(tr);
         });
-
+    }
         // Attach delete listeners
         document.querySelectorAll(".btn-delete-dir").forEach(btn => {
             btn.addEventListener("click", async () => {
@@ -1939,6 +1939,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const storageProgressBar = document.getElementById("storage-progress-bar");
     const storageDisksGrid = document.getElementById("storage-disks-grid");
     const btnAutofixPaths = document.getElementById("btn-autofix-paths");
+    const cfgOverflowMinGb = document.getElementById("cfg-overflow-min-gb");
+    const btnForceOverflow = document.getElementById("btn-force-overflow");
 
     const btnValidatePaths = document.getElementById("btn-validate-paths");
     const btnSaveSettings = document.getElementById("btn-save-settings");
@@ -1961,6 +1963,9 @@ document.addEventListener("DOMContentLoaded", () => {
             inputAdultDir.value = s.ADULT_DIR || "";
             inputWatchDir.value = s.WATCH_DIR || "";
             inputWatcherInterval.value = s.WATCHER_INTERVAL || 10;
+            if (cfgOverflowMinGb) {
+                cfgOverflowMinGb.value = s.AUTO_OVERFLOW_MIN_GB !== undefined ? s.AUTO_OVERFLOW_MIN_GB : 50;
+            }
 
             watcherToggle.checked = s.WATCHER_ENABLED !== false;
             watcherStatusText.textContent = watcherToggle.checked ? "Watcher Active" : "Watcher Disabled";
@@ -2164,7 +2169,9 @@ document.addEventListener("DOMContentLoaded", () => {
             ADULT_DIR: inputAdultDir.value,
             WATCH_DIR: inputWatchDir.value,
             WATCHER_INTERVAL: parseInt(inputWatcherInterval.value) || 10,
-            WATCHER_ENABLED: watcherToggle.checked
+            WATCHER_ENABLED: watcherToggle.checked,
+            AUTO_OVERFLOW_MIN_GB: cfgOverflowMinGb ? (parseInt(cfgOverflowMinGb.value) || 50) : 50,
+            AUTO_OVERFLOW_ENABLED: true
         };
 
         try {
@@ -2195,6 +2202,16 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
+    if (btnForceOverflow) {
+        btnForceOverflow.addEventListener("click", () => {
+            if (cfgOverflowMinGb) {
+                cfgOverflowMinGb.value = "150";
+                showAlert("Overflow threshold set to 150 GB (SSD2 active now). Saving...", "info");
+                btnSaveSettings.click();
+            }
+        });
+    }
+
     // Reset Defaults
     btnResetDefaults.addEventListener("click", () => {
         if (confirm("Reset paths and settings to standard server defaults?")) {
@@ -2207,6 +2224,7 @@ document.addEventListener("DOMContentLoaded", () => {
             inputAdultDir.value = "/media/adult";
             inputWatchDir.value = "/downloads";
             inputWatcherInterval.value = 10;
+            if (cfgOverflowMinGb) cfgOverflowMinGb.value = "50";
             validateAllPaths(false);
             showAlert("Values reset to default. Click 'Save Settings' to apply.", "success");
         }
