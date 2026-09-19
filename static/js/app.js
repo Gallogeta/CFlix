@@ -1933,6 +1933,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const badgeAdultDir = document.getElementById("badge-adult-dir");
     const badgeWatchDir = document.getElementById("badge-watch-dir");
 
+    const storageOverviewContainer = document.getElementById("storage-overview-container");
+    const storageTotalStat = document.getElementById("storage-total-stat");
+    const storageFreeBadge = document.getElementById("storage-free-badge");
+    const storageProgressBar = document.getElementById("storage-progress-bar");
+    const storageDisksGrid = document.getElementById("storage-disks-grid");
+    const btnAutofixPaths = document.getElementById("btn-autofix-paths");
+
     const btnValidatePaths = document.getElementById("btn-validate-paths");
     const btnSaveSettings = document.getElementById("btn-save-settings");
     const btnResetDefaults = document.getElementById("btn-reset-defaults");
@@ -1959,8 +1966,51 @@ document.addEventListener("DOMContentLoaded", () => {
             watcherStatusText.textContent = watcherToggle.checked ? "Watcher Active" : "Watcher Disabled";
 
             validateAllPaths(false);
+            loadStorageSummary();
         } catch (e) {
             console.error("Error loading settings:", e);
+        }
+    }
+
+    async function loadStorageSummary() {
+        if (!storageOverviewContainer) return;
+        try {
+            const resp = await apiFetch("/api/settings/storage-summary");
+            const res = await resp.json();
+            if (res && res.disks) {
+                if (storageFreeBadge) storageFreeBadge.textContent = `${res.free_human} Free`;
+                if (storageTotalStat) {
+                    storageTotalStat.textContent = `${res.free_human} free of ${res.total_human} total (${res.used_pct}% used across ${res.disk_count} drive${res.disk_count !== 1 ? 's' : ''})`;
+                }
+                if (storageProgressBar) {
+                    storageProgressBar.style.width = `${Math.min(res.used_pct, 100)}%`;
+                    storageProgressBar.className = "storage-progress-bar";
+                    if (res.used_pct >= 90) {
+                        storageProgressBar.classList.add("danger");
+                    } else if (res.used_pct >= 75) {
+                        storageProgressBar.classList.add("warning");
+                    }
+                }
+                if (storageDisksGrid) {
+                    storageDisksGrid.innerHTML = res.disks.map(d => `
+                        <div class="storage-disk-chip">
+                            <div class="storage-disk-header">
+                                <span class="storage-disk-name">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle></svg>
+                                    ${escapeHtml(d.name)}
+                                </span>
+                                <span class="storage-disk-free">${escapeHtml(d.free_human)} Free</span>
+                            </div>
+                            <div class="storage-disk-mount" title="${escapeHtml(d.mount)}">${escapeHtml(d.mount)} (${escapeHtml(d.total_human)})</div>
+                            <div class="storage-disk-mini-bar">
+                                <div class="storage-disk-mini-fill" style="width: ${d.used_pct}%; background: ${d.used_pct > 90 ? 'var(--c-danger)' : (d.used_pct > 75 ? 'var(--c-golden)' : 'var(--c-light-blue)')};"></div>
+                            </div>
+                        </div>
+                    `).join("");
+                }
+            }
+        } catch (e) {
+            console.error("Error loading storage summary:", e);
         }
     }
 
@@ -1983,8 +2033,11 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await resp.json();
 
             if (res.exists && res.is_dir) {
-                badgeEl.className = "path-badge valid";
-                badgeEl.textContent = `✔ Valid (${res.free_gb} GB Free)`;
+                const diskPrefix = res.disk_name ? `${res.disk_name} • ` : "";
+                const freeStr = res.free_human || `${res.free_gb} GB`;
+                const writableBadge = res.writable ? "" : " (Read-Only)";
+                badgeEl.className = res.writable ? "path-badge valid" : "path-badge missing";
+                badgeEl.textContent = `✔ Valid (${diskPrefix}${freeStr} Free${writableBadge})`;
             } else {
                 badgeEl.className = "path-badge missing";
                 badgeEl.textContent = "✖ Missing Directory";
@@ -2005,13 +2058,63 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Real-time path change validation
     [inputMoviesDir, inputSeriesDir, inputAnimeDir, inputAdultDir, inputWatchDir].filter(Boolean).forEach(input => {
-        input.addEventListener("blur", () => validateAllPaths(false));
+        input.addEventListener("blur", () => {
+            validateAllPaths(false);
+            loadStorageSummary();
+        });
     });
 
     btnValidatePaths.addEventListener("click", () => {
         validateAllPaths(true);
+        loadStorageSummary();
         showAlert("Validated paths and created any missing directories on host.", "success");
     });
+
+    // Auto-detect and fix storage paths
+    if (btnAutofixPaths) {
+        btnAutofixPaths.addEventListener("click", async () => {
+            btnAutofixPaths.disabled = true;
+            const originalHtml = btnAutofixPaths.innerHTML;
+            btnAutofixPaths.innerHTML = `<span>⚡ Scanning & Fixing...</span>`;
+
+            try {
+                const resp = await apiFetch("/api/settings/auto-fix-paths", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ apply: true })
+                });
+                const res = await resp.json();
+
+                if (res.success && res.detected_paths) {
+                    const dp = res.detected_paths;
+                    if (dp.MOVIES_DIR) inputMoviesDir.value = dp.MOVIES_DIR;
+                    if (dp.SERIES_DIR) inputSeriesDir.value = dp.SERIES_DIR;
+                    if (dp.ANIME_DIR && inputAnimeDir) inputAnimeDir.value = dp.ANIME_DIR;
+                    if (dp.ADULT_DIR) inputAdultDir.value = dp.ADULT_DIR;
+                    if (dp.WATCH_DIR) inputWatchDir.value = dp.WATCH_DIR;
+
+                    validateAllPaths(false);
+                    loadStorageSummary();
+                    if (typeof loadMediaDirectories === "function") {
+                        loadMediaDirectories();
+                    }
+
+                    if (res.changes_count > 0) {
+                        showAlert(`⚡ Successfully auto-detected and fixed ${res.changes_count} storage paths! Settings saved.`, "success");
+                    } else {
+                        showAlert("⚡ All storage paths already match active media libraries and drives perfectly.", "success");
+                    }
+                } else {
+                    showAlert("Failed to auto-detect paths: " + (res.error || "Unknown error"), "error");
+                }
+            } catch (e) {
+                showAlert("Error during path auto-detection: " + e.message, "error");
+            } finally {
+                btnAutofixPaths.disabled = false;
+                btnAutofixPaths.innerHTML = originalHtml;
+            }
+        });
+    }
 
     // Test Jellyfin Connection
     btnTestJellyfin.addEventListener("click", async () => {
@@ -2075,6 +2178,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (res.success) {
                 showAlert("Settings and paths updated and persisted successfully to data/settings.json!", "success");
                 validateAllPaths(false);
+                loadStorageSummary();
                 // Update header status
                 checkServerStatus();
             } else {

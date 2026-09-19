@@ -18,7 +18,7 @@ from logger import emit_log, subscribe, unsubscribe, get_recent_logs
 from metadata import clean_filename, search_imdb, fetch_series_episodes, search_anime, fetch_anime_episodes
 from processor import process_and_ingest, trigger_jellyfin_refresh
 from collections_manager import collections_mgr
-from directories_manager import directories_mgr
+from directories_manager import directories_mgr, format_bytes
 from theme_manager import theme_mgr
 from watcher import watcher
 
@@ -629,14 +629,59 @@ async def validate_path_handler(request):
     exists = os.path.exists(path)
     is_dir = os.path.isdir(path) if exists else False
     free_gb = 0
+    total_gb = 0
+    free_human = "0 GB"
+    total_human = "0 GB"
+    disk_mount = ""
+    disk_name = ""
+    writable = False
+
     if exists and is_dir:
         try:
             total, used, free = shutil.disk_usage(path)
             free_gb = round(free / (1024 * 1024 * 1024), 1)
+            total_gb = round(total / (1024 * 1024 * 1024), 1)
+            free_human = format_bytes(free)
+            total_human = format_bytes(total)
+
+            curr = os.path.abspath(path)
+            while curr != "/" and not os.path.ismount(curr):
+                curr = os.path.dirname(curr)
+            disk_mount = curr
+            disk_name = os.path.basename(curr.rstrip("/")) or "root"
+            writable = os.access(path, os.W_OK)
         except Exception:
             pass
 
-    return web.json_response({"exists": exists, "is_dir": is_dir, "free_gb": free_gb})
+    return web.json_response({
+        "exists": exists,
+        "is_dir": is_dir,
+        "free_gb": free_gb,
+        "total_gb": total_gb,
+        "free_human": free_human,
+        "total_human": total_human,
+        "disk_mount": disk_mount,
+        "disk_name": disk_name,
+        "writable": writable
+    })
+
+@routes.get("/api/settings/storage-summary")
+async def get_storage_summary_handler(request):
+    loop = asyncio.get_event_loop()
+    summary = await loop.run_in_executor(None, directories_mgr.get_storage_summary)
+    return web.json_response(summary)
+
+@routes.post("/api/settings/auto-fix-paths")
+async def auto_fix_paths_handler(request):
+    data = {}
+    try:
+        data = await request.json()
+    except Exception:
+        pass
+    apply_changes = data.get("apply", True)
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, directories_mgr.auto_detect_correct_paths, apply_changes)
+    return web.json_response(res)
 
 # --- Media Directories & Library Management Endpoints ---
 @routes.get("/api/directories")

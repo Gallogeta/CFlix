@@ -524,6 +524,28 @@
                             <h3>2. Media Storage Paths</h3>
                             <p>Configure where movies, series, and incoming downloads should be saved on the host filesystem.</p>
 
+                            <!-- Storage Overview Banner -->
+                            <div class="storage-overview-banner" id="storage-overview-container">
+                                <div class="storage-banner-header">
+                                    <div class="storage-title-wrap">
+                                        <div class="storage-icon-circle">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+                                        </div>
+                                        <div>
+                                            <div class="storage-headline">Total Media Storage Free Space</div>
+                                            <div class="storage-subline" id="storage-total-stat">Calculating space across drives...</div>
+                                        </div>
+                                    </div>
+                                    <div class="storage-badge-total" id="storage-free-badge">-- TB Free</div>
+                                </div>
+                                <div class="storage-progress-container">
+                                    <div class="storage-progress-bar" id="storage-progress-bar" style="width: 0%;"></div>
+                                </div>
+                                <div class="storage-disks-grid" id="storage-disks-grid">
+                                    <!-- Dynamic disk chips rendered here -->
+                                </div>
+                            </div>
+
                             <div class="form-group margin-top">
                                 <div class="label-with-badge">
                                     <label class="input-label">Movies Destination Path</label>
@@ -564,9 +586,16 @@
                                 <input type="text" id="input-watch-dir" class="text-input" placeholder="/downloads">
                             </div>
 
-                            <button type="button" class="btn-secondary btn-sm" id="btn-validate-paths">
-                                <span>Validate Paths & Auto-Create Missing</span>
-                            </button>
+                            <div class="path-actions-row">
+                                <button type="button" class="btn-primary btn-sm btn-autofix" id="btn-autofix-paths" title="Auto-detect real media folders across all storage drives and fix broken or default paths">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                    <span>⚡ Auto-Detect & Fix Correct Paths</span>
+                                </button>
+                                <button type="button" class="btn-secondary btn-sm" id="btn-validate-paths">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                    <span>Validate Paths & Create Missing</span>
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Card 3: Media Directories & Library Management (Create & Delete) -->
