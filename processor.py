@@ -118,8 +118,9 @@ def cleanup_existing_duplicates(
                 except Exception as e:
                     emit_log(f"Notice checking old episodes in '{d}': {e}")
 
-            # Clean up empty season directory if left empty
-            if os.path.exists(s_dir):
+            # Clean up empty season directory if left empty ONLY if it is not the current target directory
+            target_dir = os.path.dirname(final_norm)
+            if os.path.exists(s_dir) and os.path.normpath(s_dir) != target_dir:
                 try:
                     if not [e for e in os.listdir(s_dir) if not e.startswith(".")]:
                         os.rmdir(s_dir)

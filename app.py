@@ -689,6 +689,7 @@ async def watcher_toggle_handler(request):
 async def refresh_library_handler(request):
     loop = asyncio.get_event_loop()
     ok = await loop.run_in_executor(None, trigger_jellyfin_refresh)
+    return web.json_response({"success": bool(ok)})
 # --- Multi-Server Management Endpoints ---
 @routes.get("/api/servers")
 async def get_servers_handler(request):
