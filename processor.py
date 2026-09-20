@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import urllib.request
 import json
+import re
 from typing import Optional, Dict, Any
 
 from config import (
@@ -11,6 +12,8 @@ from config import (
 )
 from logger import emit_log
 from directories_manager import directories_mgr
+
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".ts", ".webm", ".m4v", ".wmv", ".iso"}
 
 def sanitize_filename(name: str) -> str:
     # Replace invalid filesystem characters
@@ -60,6 +63,107 @@ def trigger_jellyfin_refresh():
     except Exception as e:
         emit_log(f"Error triggering Jellyfin refresh: {e}")
         return False
+
+def cleanup_existing_duplicates(
+    category_or_library: str,
+    is_series: bool,
+    title: str,
+    year: Optional[str],
+    season: Optional[int],
+    episode: Optional[int],
+    final_dest: str
+):
+    """When overwriting/re-uploading media, safely removes old versions of the same movie or episode
+    both in the target directory and across ALL drives in the multi-drive storage pool so no duplicates remain."""
+    final_norm = os.path.normpath(final_dest)
+
+    # 1. Remove exact destination file if it already exists
+    if os.path.exists(final_norm):
+        try:
+            os.remove(final_norm)
+            emit_log(f"[Overwrite] Removed existing destination file: '{final_norm}'")
+        except Exception as e:
+            emit_log(f"Notice: Could not remove existing file at '{final_norm}': {e}")
+
+    clean_t = sanitize_filename(title)
+    candidate_roots = directories_mgr.get_candidate_paths_for_library(category_or_library)
+
+    if is_series and season is not None and episode is not None:
+        ep_pattern = re.compile(rf"(?i)\bs0*{season}e0*{episode}\b")
+        season_folder = f"Season {season:02d}"
+
+        for root in candidate_roots:
+            show_dir = os.path.join(root, clean_t)
+            if not os.path.exists(show_dir) or not os.path.isdir(show_dir):
+                continue
+
+            s_dir = os.path.join(show_dir, season_folder)
+            check_dirs = [s_dir, show_dir] if os.path.exists(s_dir) else [show_dir]
+
+            for d in check_dirs:
+                if not os.path.exists(d):
+                    continue
+                try:
+                    for f in os.listdir(d):
+                        f_lower = f.lower()
+                        ext = os.path.splitext(f_lower)[1]
+                        if ext in VIDEO_EXTENSIONS and ep_pattern.search(f_lower):
+                            old_file = os.path.normpath(os.path.join(d, f))
+                            if old_file != final_norm and os.path.exists(old_file):
+                                try:
+                                    os.remove(old_file)
+                                    emit_log(f"[Overwrite] Removed previous episode version from '{root}': '{old_file}'")
+                                except Exception as err:
+                                    emit_log(f"Notice removing old episode '{old_file}': {err}")
+                except Exception as e:
+                    emit_log(f"Notice checking old episodes in '{d}': {e}")
+
+            # Clean up empty season directory if left empty
+            if os.path.exists(s_dir):
+                try:
+                    if not [e for e in os.listdir(s_dir) if not e.startswith(".")]:
+                        os.rmdir(s_dir)
+                except Exception:
+                    pass
+
+    else:
+        # Movies or single titles
+        stems_to_match = {clean_t.lower()}
+        if year:
+            stems_to_match.add(f"{clean_t} ({year})".lower())
+
+        for root in candidate_roots:
+            if not os.path.exists(root) or not os.path.isdir(root):
+                continue
+            try:
+                for f in os.listdir(root):
+                    f_lower = f.lower()
+                    f_stem, f_ext = os.path.splitext(f_lower)
+                    if f_ext in VIDEO_EXTENSIONS and f_stem in stems_to_match:
+                        old_file = os.path.normpath(os.path.join(root, f))
+                        if old_file != final_norm and os.path.exists(old_file):
+                            try:
+                                os.remove(old_file)
+                                emit_log(f"[Overwrite] Removed previous movie version from '{root}': '{old_file}'")
+                            except Exception as err:
+                                emit_log(f"Notice removing old movie '{old_file}': {err}")
+
+                    # Also check subfolder structure (e.g. root/Movie (Year)/Movie (Year).mkv)
+                    sub_p = os.path.join(root, f)
+                    if os.path.isdir(sub_p) and f.lower() in stems_to_match:
+                        for sf in os.listdir(sub_p):
+                            sf_lower = sf.lower()
+                            sf_ext = os.path.splitext(sf_lower)[1]
+                            if sf_ext in VIDEO_EXTENSIONS:
+                                old_file = os.path.normpath(os.path.join(sub_p, sf))
+                                if old_file != final_norm and os.path.exists(old_file):
+                                    try:
+                                        os.remove(old_file)
+                                        emit_log(f"[Overwrite] Removed previous movie in subfolder on '{root}': '{old_file}'")
+                                    except Exception as err:
+                                        emit_log(f"Notice removing old movie '{old_file}': {err}")
+            except Exception as e:
+                emit_log(f"Notice checking old movies in '{root}': {e}")
 
 def process_and_ingest(
     src_file: str,
@@ -119,8 +223,9 @@ def process_and_ingest(
         final_dir = os.path.dirname(final_dest)
         os.makedirs(final_dir, exist_ok=True)
     elif target_category == "anime":
+        alloc_cat = custom_dir if custom_dir else "anime"
         dest_base = directories_mgr.smart_allocate_path(
-            category_or_library=custom_dir if custom_dir else "anime",
+            category_or_library=alloc_cat,
             required_bytes=src_size,
             title=clean_title_str
         )
@@ -130,8 +235,9 @@ def process_and_ingest(
         final_dest = os.path.join(dest_base, filename)
 
     elif target_category == "adult":
+        alloc_cat = custom_dir if custom_dir else "adult"
         dest_base = directories_mgr.smart_allocate_path(
-            category_or_library=custom_dir if custom_dir else "adult",
+            category_or_library=alloc_cat,
             required_bytes=src_size,
             title=clean_title_str
         )
@@ -140,8 +246,9 @@ def process_and_ingest(
         final_dest = os.path.join(dest_base, filename)
 
     elif target_category == "custom" and custom_dir:
+        alloc_cat = custom_dir
         dest_base = directories_mgr.smart_allocate_path(
-            category_or_library=custom_dir,
+            category_or_library=alloc_cat,
             required_bytes=src_size,
             title=clean_title_str
         )
@@ -201,13 +308,28 @@ def process_and_ingest(
         emit_log(f"Warning: ffmpeg error ({e}). Fallback to copy.")
         shutil.copy2(src_file, staging_file)
 
-    # Step 2: Move to destination storage
+    # Step 2: Overwrite cleanup & move to destination storage
+    if overwrite:
+        cleanup_existing_duplicates(
+            category_or_library=alloc_cat,
+            is_series=is_series_format,
+            title=clean_title_str,
+            year=year,
+            season=s_num if is_series_format else None,
+            episode=e_num if is_series_format else None,
+            final_dest=final_dest
+        )
+    elif os.path.exists(final_dest):
+        emit_log(f"Notice: Destination file '{final_dest}' already exists and overwrite is disabled. Skipping move.")
+        return {"success": True, "destination": final_dest, "title": clean_title_str, "skipped": True}
+
     emit_log(f"Moving file to media storage: '{final_dest}'...")
     try:
-        if os.path.exists(final_dest) and overwrite:
-            emit_log(f"Replacing existing file at '{final_dest}' as requested.")
-            os.remove(final_dest)
         shutil.move(staging_file, final_dest)
+        try:
+            os.chmod(final_dest, 0o666)
+        except Exception:
+            pass
     except Exception as e:
         emit_log(f"Failed to move to destination: {e}")
         return {"success": False, "error": str(e)}

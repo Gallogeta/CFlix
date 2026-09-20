@@ -23,8 +23,9 @@ services:
       - WATCHER_ENABLED=${WATCHER_ENABLED:-true}
       - WATCHER_INTERVAL=${WATCHER_INTERVAL:-10}
     volumes:
-      - ./data:/app/data
-      - /mnt:/mnt
+      - ./:/app
+      - /mnt/media_ssd:/mnt/media_ssd
+      - /mnt/media_ssd2:/mnt/media_ssd2
       - ${MEDIA_ROOT:-/media}:${MEDIA_ROOT:-/media}
       - ${WATCH_DIR:-/downloads}:${WATCH_DIR:-/downloads}
       - ${JELLYFIN_CONFIG_DIR:-/config}:${JELLYFIN_CONFIG_DIR:-/config}

@@ -7,31 +7,56 @@ from typing import List, Dict, Any, Optional
 
 from config import (
     get_movies_dir, get_series_dir, get_anime_dir, get_adult_dir, get_watch_dir,
-    get_jellyfin_url, get_jellyfin_user, get_jellyfin_pass, cfg
+    get_media_root, get_media_roots, get_jellyfin_url, get_jellyfin_user, get_jellyfin_pass, cfg
 )
 from logger import emit_log
 
 PROTECTED_NAMES = {
+    "immich_data", "immich_fast", "immich", "hdd_test",
     "lost+found", "transcode", ".trash-1000", ".tmp_uploads", ".staging"
 }
 
 IGNORE_DIRS = {
+    "immich_data", "immich_fast", "immich", "hdd_test",
     "lost+found", "transcode", ".trash-1000", ".tmp_uploads", ".staging",
     "kavita", "manga", "boost", "books", "comics", "config", "collections"
 }
 
+SYSTEM_ROOTS = {"/", "/media", "/mnt", "/home", "/etc", "/var", "/usr", "/bin", "/tmp"}
+
 MEDIA_VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".wmv", ".iso", ".ts"}
+
+def is_excluded_path(path_or_name: str) -> bool:
+    """Strict exclusion check. Ensures system directories and unlinked drives (e.g. Immich cold storage) are never touched."""
+    if not path_or_name:
+        return True
+    norm = os.path.normpath(str(path_or_name))
+    base = os.path.basename(norm).lower()
+    full = norm.lower()
+
+    # Strictly preserve cold-storage Immich HDD safety
+    if "immich" in base or "immich" in full:
+        return True
+    if base in PROTECTED_NAMES:
+        return True
+    if base.startswith(".") or base.startswith("@"):
+        return True
+    if norm in SYSTEM_ROOTS:
+        return True
+    if any(full.startswith(sys_p) for sys_p in ["/proc", "/sys", "/dev", "/boot", "/etc", "/var/lib/docker", "/snap"]):
+        return True
+    return False
 
 def count_media_items(dir_path: str, content_type: str = "movies") -> int:
     """Accurately counts video titles and shows instead of raw files (ignoring metadata, posters, fanarts, subtitles, trickplay)."""
-    if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
+    if not os.path.exists(dir_path) or not os.path.isdir(dir_path) or is_excluded_path(dir_path):
         return 0
     try:
         entries = [
             e for e in os.listdir(dir_path)
             if not e.startswith(".")
             and not e.endswith(".trickplay")
-            and e.lower() not in PROTECTED_NAMES
+            and not is_excluded_path(e)
         ]
         if content_type == "series":
             subdirs = [e for e in entries if os.path.isdir(os.path.join(dir_path, e))]
@@ -42,8 +67,6 @@ def count_media_items(dir_path: str, content_type: str = "movies") -> int:
         return len(video_files) + len(subdirs)
     except Exception:
         return 0
-
-SYSTEM_ROOTS = {"/", "/media", "/mnt", "/home", "/etc", "/var", "/usr", "/bin", "/tmp"}
 
 def format_bytes(b: int) -> str:
     """Formats bytes into human readable format (GB, TB, etc.)."""
@@ -67,56 +90,73 @@ class DirectoriesManager:
 
     @property
     def media_roots(self) -> List[str]:
-        """Discovers all available media root paths and mounted disks (e.g. /mnt/media_ssd, /mnt/media_ssd2)."""
+        """Discovers all available media root paths and mounted disks across the system (SSDs and HDDs)."""
         roots = set()
+
+        # 1. Explicitly configured MEDIA_ROOTS in settings/env (comma-separated list or array)
+        for r in get_media_roots():
+            if r and not is_excluded_path(r) and os.path.exists(r) and os.path.isdir(r):
+                roots.add(os.path.normpath(r))
+
+        # 2. Configured primary MEDIA_ROOT
+        cfg_root = cfg.get("MEDIA_ROOT", "/media")
+        if cfg_root and not is_excluded_path(cfg_root) and os.path.exists(cfg_root) and os.path.isdir(cfg_root):
+            roots.add(os.path.normpath(cfg_root))
+
+        # 3. Mounts of configured primary directories (movies, series, anime, adult)
         for p in [get_movies_dir(), get_series_dir(), get_anime_dir(), get_adult_dir()]:
-            if p and os.path.exists(p):
+            if p and os.path.exists(p) and not is_excluded_path(p):
                 curr = os.path.abspath(p)
                 while curr != "/" and not os.path.ismount(curr):
                     curr = os.path.dirname(curr)
-                if curr not in SYSTEM_ROOTS and os.path.exists(curr):
+                if curr not in SYSTEM_ROOTS and os.path.exists(curr) and not is_excluded_path(curr):
                     roots.add(curr)
                 else:
-                    norm = os.path.normpath(p)
-                    parent = os.path.dirname(norm)
-                    if parent and parent not in SYSTEM_ROOTS and os.path.exists(parent):
+                    parent = os.path.dirname(os.path.normpath(p))
+                    if parent and parent not in SYSTEM_ROOTS and os.path.exists(parent) and not is_excluded_path(parent):
                         roots.add(parent)
-        
-        cfg_root = os.path.normpath(cfg.get("MEDIA_ROOT", "/media"))
-        if os.path.exists(cfg_root) and cfg_root not in SYSTEM_ROOTS:
-            roots.add(cfg_root)
 
-        # Scan /mnt and /media for external SSDs and storage drives
-        for base_mount in ["/mnt", "/media", cfg.get("MEDIA_ROOT", "/media")]:
+        # 4. Storage drives discovered in /mnt and /media (SSDs, HDDs, expansion pools)
+        for base_mount in ["/mnt", "/media"]:
             if base_mount and os.path.exists(base_mount) and os.path.isdir(base_mount):
                 try:
                     for entry in sorted(os.listdir(base_mount)):
-                        if entry.startswith(".") or entry.lower() in PROTECTED_NAMES:
+                        full_p = os.path.normpath(os.path.join(base_mount, entry))
+                        if is_excluded_path(full_p):
                             continue
-                        full_p = os.path.join(base_mount, entry)
-                        if os.path.isdir(full_p) and any(kw in entry.lower() for kw in ["media", "ssd", "disk", "drive", "hdd", "storage", "kingston"]):
-                            # Must be a mount point or contain media folders
-                            if os.path.ismount(full_p) or any(os.path.exists(os.path.join(full_p, sub)) for sub in ["jellyfin", "movies", "Anime", "Adult", "jellyfin_series"]):
-                                roots.add(os.path.normpath(full_p))
+                        if not os.path.isdir(full_p):
+                            continue
+                        # Valid media drive if it is an active mount point or contains media folders
+                        is_mount = os.path.ismount(full_p)
+                        has_media = any(
+                            os.path.exists(os.path.join(full_p, sub))
+                            for sub in [
+                                "jellyfin", "movies", "Movies", "jellyfin_series",
+                                "Shows", "shows", "Anime", "Adult", "Children",
+                                "Eesti filmid", "Filmid"
+                            ]
+                        )
+                        if is_mount or has_media:
+                            roots.add(full_p)
                 except Exception:
                     pass
 
-        valid_roots = [r for r in sorted(list(roots)) if os.path.exists(r) and os.path.isdir(r)]
-        return valid_roots if valid_roots else [cfg_root]
+        valid_roots = [r for r in sorted(list(roots)) if os.path.exists(r) and os.path.isdir(r) and not is_excluded_path(r)]
+        return valid_roots if valid_roots else [os.path.normpath(cfg.get("MEDIA_ROOT", "/media"))]
 
     def get_storage_summary(self) -> Dict[str, Any]:
-        """Calculates total media storage capacity and per-disk breakdown across all media disks."""
+        """Calculates total media storage capacity and per-disk breakdown across all connected media drives."""
         candidate_paths = set()
         for r in self.media_roots:
             candidate_paths.add(r)
 
         for p in [get_movies_dir(), get_series_dir(), get_anime_dir(), get_adult_dir(), cfg.get("MEDIA_ROOT")]:
-            if p and os.path.exists(p):
+            if p and os.path.exists(p) and not is_excluded_path(p):
                 candidate_paths.add(p)
 
         disks_by_dev = {}
         for p in candidate_paths:
-            if not os.path.exists(p):
+            if not os.path.exists(p) or is_excluded_path(p):
                 continue
             try:
                 st = os.stat(p)
@@ -173,183 +213,6 @@ class DirectoriesManager:
             "disks": target_disks
         }
 
-    def auto_detect_correct_paths(self, apply_changes: bool = False) -> Dict[str, Any]:
-        """Scans host filesystem and Jellyfin virtual folders to detect active media libraries and fix broken/default paths."""
-        detected = {}
-        changes = {}
-        reasons = []
-
-        current_paths = {
-            "MOVIES_DIR": get_movies_dir(),
-            "SERIES_DIR": get_series_dir(),
-            "ANIME_DIR": get_anime_dir(),
-            "ADULT_DIR": get_adult_dir(),
-            "WATCH_DIR": get_watch_dir(),
-            "MEDIA_ROOT": cfg.get("MEDIA_ROOT")
-        }
-
-        # 1. Query Jellyfin VirtualFolders
-        jf_vfs = self.get_jellyfin_virtual_folders()
-        jf_movies_paths = []
-        jf_series_paths = []
-        jf_anime_paths = []
-
-        for vf in jf_vfs:
-            name = vf.get("Name", "").lower()
-            ctype = vf.get("CollectionType", "").lower()
-            locs = vf.get("Locations", [])
-            for loc in locs:
-                candidate_locs = [loc]
-                if loc.startswith("/data2/"):
-                    candidate_locs.append(loc.replace("/data2/", "/mnt/media_ssd2/"))
-                elif loc.startswith("/data/"):
-                    candidate_locs.append(loc.replace("/data/", "/mnt/media_ssd/"))
-                
-                folder_sub = os.path.basename(loc.rstrip("/"))
-                for r in self.media_roots:
-                    candidate_locs.append(os.path.join(r, folder_sub))
-
-                for c in candidate_locs:
-                    if os.path.exists(c) and os.path.isdir(c):
-                        if "anime" in name:
-                            jf_anime_paths.append(c)
-                        elif ctype == "tvshows" or "show" in name or "series" in name:
-                            jf_series_paths.append(c)
-                        elif ctype == "movies" or "movie" in name or "film" in name:
-                            jf_movies_paths.append(c)
-
-        # 2. Candidate pool for each category
-        # --- MOVIES_DIR ---
-        movie_candidates = []
-        curr_m = current_paths["MOVIES_DIR"]
-        if curr_m and os.path.exists(curr_m) and curr_m not in ["/media/movies", "/media", "/movies"]:
-            movie_candidates.append(curr_m)
-        movie_candidates.extend(jf_movies_paths)
-        for r in self.media_roots:
-            for sub in ["jellyfin", "movies", "Movies", "Filmid", "Eesti filmid"]:
-                p = os.path.join(r, sub)
-                if os.path.exists(p) and os.path.isdir(p):
-                    movie_candidates.append(p)
-
-        best_movies = None
-        max_movie_items = -1
-        for p in movie_candidates:
-            if os.path.exists(p) and os.path.isdir(p):
-                cnt = count_media_items(p, "movies")
-                if cnt > max_movie_items:
-                    max_movie_items = cnt
-                    best_movies = p
-        if not best_movies and movie_candidates:
-            best_movies = movie_candidates[0]
-        detected["MOVIES_DIR"] = best_movies or current_paths["MOVIES_DIR"] or "/mnt/media_ssd/jellyfin"
-
-        # --- SERIES_DIR ---
-        series_candidates = []
-        curr_s = current_paths["SERIES_DIR"]
-        if curr_s and os.path.exists(curr_s) and curr_s not in ["/media/tv", "/media/series", "/media", "/tv"]:
-            series_candidates.append(curr_s)
-        series_candidates.extend(jf_series_paths)
-        for r in self.media_roots:
-            for sub in ["jellyfin_series", "series", "Series", "TV", "tv", "Shows"]:
-                p = os.path.join(r, sub)
-                if os.path.exists(p) and os.path.isdir(p):
-                    series_candidates.append(p)
-
-        best_series = None
-        max_series_items = -1
-        for p in series_candidates:
-            if os.path.exists(p) and os.path.isdir(p):
-                cnt = count_media_items(p, "series")
-                if cnt > max_series_items:
-                    max_series_items = cnt
-                    best_series = p
-        if not best_series and series_candidates:
-            best_series = series_candidates[0]
-        detected["SERIES_DIR"] = best_series or current_paths["SERIES_DIR"] or "/mnt/media_ssd/jellyfin_series"
-
-        # --- ANIME_DIR ---
-        anime_candidates = []
-        curr_a = current_paths["ANIME_DIR"]
-        if curr_a and os.path.exists(curr_a) and curr_a not in ["/media/anime", "/anime"]:
-            anime_candidates.append(curr_a)
-        anime_candidates.extend(jf_anime_paths)
-        for r in self.media_roots:
-            for sub in ["Anime", "anime"]:
-                p = os.path.join(r, sub)
-                if os.path.exists(p) and os.path.isdir(p):
-                    anime_candidates.append(p)
-
-        best_anime = None
-        for p in anime_candidates:
-            if os.path.exists(p) and os.path.isdir(p):
-                best_anime = p
-                break
-        detected["ANIME_DIR"] = best_anime or current_paths["ANIME_DIR"] or "/mnt/media_ssd/Anime"
-
-        # --- ADULT_DIR ---
-        adult_candidates = []
-        curr_ad = current_paths["ADULT_DIR"]
-        if curr_ad and os.path.exists(curr_ad) and curr_ad not in ["/media/adult", "/adult"]:
-            adult_candidates.append(curr_ad)
-        for r in self.media_roots:
-            for sub in ["Adult", "adult", "xxx", "XXX"]:
-                p = os.path.join(r, sub)
-                if os.path.exists(p) and os.path.isdir(p):
-                    adult_candidates.append(p)
-        detected["ADULT_DIR"] = adult_candidates[0] if adult_candidates else (current_paths["ADULT_DIR"] or "/mnt/media_ssd/Adult")
-
-        # --- WATCH_DIR ---
-        watch_candidates = []
-        curr_w = current_paths["WATCH_DIR"]
-        if curr_w and os.path.exists(curr_w) and curr_w not in ["/downloads", "/media/downloads"]:
-            watch_candidates.append(curr_w)
-        for p in ["/home/gallo/dwhelper", "/home/gallo/Downloads", "/downloads", "/var/downloads"]:
-            if os.path.exists(p) and os.path.isdir(p):
-                watch_candidates.append(p)
-        detected["WATCH_DIR"] = watch_candidates[0] if watch_candidates else (current_paths["WATCH_DIR"] or "/home/gallo/dwhelper")
-
-        # --- MEDIA_ROOT ---
-        if self.media_roots:
-            detected["MEDIA_ROOT"] = self.media_roots[0]
-        else:
-            detected["MEDIA_ROOT"] = "/mnt/media_ssd"
-
-        # Track differences
-        for k, new_v in detected.items():
-            old_v = current_paths.get(k)
-            if old_v != new_v:
-                changes[k] = {"old": old_v, "new": new_v}
-                reasons.append(f"Updated {k} from '{old_v}' to '{new_v}'")
-
-        if apply_changes and changes:
-            to_update = {k: v["new"] for k, v in changes.items()}
-            cfg.update(to_update)
-            emit_log(f"Auto-fixed {len(changes)} media storage paths: {', '.join(changes.keys())}")
-
-        return {
-            "success": True,
-            "detected_paths": detected,
-            "previous_paths": current_paths,
-            "changes_count": len(changes),
-            "changes": changes,
-            "reasons": reasons,
-            "applied": apply_changes
-        }
-
-    @property
-    def media_root(self) -> str:
-        roots = self.media_roots
-        return roots[0] if roots else cfg.get("MEDIA_ROOT", "/media")
-
-    def get_available_parent_locations(self) -> List[Dict[str, str]]:
-        """Returns list of selectable parent directories for creating new libraries/folders."""
-        locations = []
-        for r in self.media_roots:
-            basename = os.path.basename(r)
-            display = f"{basename} ({r})" if basename else r
-            locations.append({"path": r, "name": display})
-        return locations
-
     def get_jellyfin_token(self) -> Optional[str]:
         auth = cfg.test_jellyfin(get_jellyfin_url(), get_jellyfin_user(), get_jellyfin_pass())
         return auth.get("token") if auth.get("success") else None
@@ -378,12 +241,285 @@ class DirectoriesManager:
             emit_log(f"Notice: Unable to query VirtualFolders: {e}")
             return []
 
+    def translate_jellyfin_location_to_host(self, loc: str) -> List[str]:
+        """Maps Jellyfin container paths (e.g. /data/..., /data2/..., /media/...) to host filesystem paths."""
+        if not loc:
+            return []
+        resolved = []
+        norm = os.path.normpath(loc)
+
+        if os.path.exists(norm) and not is_excluded_path(norm):
+            resolved.append(norm)
+
+        sub_folder = os.path.basename(norm.rstrip("/\\"))
+        roots = self.media_roots
+
+        # Container volume prefix translations (/data -> root 0, /data2 -> root 1, /data3 -> root 2 ...)
+        if norm.startswith("/data2") and len(roots) > 1:
+            mapped = norm.replace("/data2", roots[1], 1)
+            if os.path.exists(mapped) and not is_excluded_path(mapped):
+                resolved.append(os.path.normpath(mapped))
+        elif norm.startswith("/data") and len(roots) > 0:
+            mapped = norm.replace("/data", roots[0], 1)
+            if os.path.exists(mapped) and not is_excluded_path(mapped):
+                resolved.append(os.path.normpath(mapped))
+
+        # Check if matching folder exists directly on any discovered media root
+        for r in roots:
+            cand = os.path.join(r, sub_folder)
+            if os.path.exists(cand) and not is_excluded_path(cand):
+                resolved.append(os.path.normpath(cand))
+
+        return list(dict.fromkeys(resolved))
+
+    def get_candidate_paths_for_library(self, category_or_library: str) -> List[str]:
+        """Returns all physical directory paths across all media storage drives for a given library or category."""
+        cat = (category_or_library or "").strip()
+        cat_lower = cat.lower()
+
+        folder_names = []
+        primary_dir = None
+
+        if any(w in cat_lower for w in ["jellyfin_series", "series", "show", "tv"]):
+            primary_dir = get_series_dir()
+            folder_names = ["jellyfin_series", "Shows", "shows", "Series", "series", "tv", "TV"]
+        elif "anime" in cat_lower:
+            primary_dir = get_anime_dir()
+            folder_names = ["Anime", "anime"]
+        elif "adult" in cat_lower:
+            primary_dir = get_adult_dir()
+            folder_names = ["Adult", "adult"]
+        elif "children" in cat_lower or "kids" in cat_lower:
+            folder_names = ["Children", "children", "Kids", "kids"]
+        elif "eesti" in cat_lower:
+            folder_names = ["Eesti filmid", "eesti filmid"]
+        elif any(w in cat_lower for w in ["movie", "film"]) or cat_lower.rstrip("/").endswith("/jellyfin") or cat_lower == "jellyfin":
+            primary_dir = get_movies_dir()
+            folder_names = ["jellyfin", "movies", "Movies", "filmid", "Films"]
+        elif os.path.isabs(cat):
+            base_folder = os.path.basename(cat.rstrip("/\\"))
+            folder_names = [base_folder]
+            primary_dir = cat
+        else:
+            folder_names = [cat]
+
+        candidates = []
+        seen = set()
+
+        def add_candidate(p: str):
+            if not p:
+                return
+            norm = os.path.normpath(p)
+            if norm not in seen and not is_excluded_path(norm):
+                seen.add(norm)
+                candidates.append(norm)
+
+        # 1. Configured primary path
+        if primary_dir and not is_excluded_path(primary_dir):
+            add_candidate(primary_dir)
+
+        # 2. VirtualFolders from Jellyfin
+        jf_vfs = self.get_jellyfin_virtual_folders()
+        for vf in jf_vfs:
+            vf_name = vf.get("Name", "").strip()
+            vf_name_lower = vf_name.lower()
+
+            match = False
+            if cat_lower in (vf_name_lower, vf.get("ItemId", "").lower()):
+                match = True
+            elif any(fn.lower() == vf_name_lower for fn in folder_names):
+                match = True
+            elif cat_lower in ("movies", "movie") and vf_name_lower in ("movies", "filmid", "jellyfin"):
+                match = True
+            elif cat_lower in ("series", "show", "shows", "tv", "tvshows") and vf_name_lower in ("shows", "tv series", "series", "jellyfin_series"):
+                match = True
+
+            if match:
+                for loc in vf.get("Locations", []):
+                    for resolved_loc in self.translate_jellyfin_location_to_host(loc):
+                        add_candidate(resolved_loc)
+
+        # 3. Across ALL media roots (Root 1, Root 2, Root 3, ... Root N)
+        roots = self.media_roots
+        for r in roots:
+            found_existing = False
+            for fn in folder_names:
+                p = os.path.join(r, fn)
+                if os.path.exists(p) and os.path.isdir(p) and not is_excluded_path(p):
+                    add_candidate(p)
+                    found_existing = True
+                    break
+
+            if not found_existing:
+                pref_folder = folder_names[0] if folder_names else "media"
+                add_candidate(os.path.join(r, pref_folder))
+
+        return candidates if candidates else [primary_dir or "/media"]
+
+    def ensure_jellyfin_virtual_folder_path(self, category_or_library: str, host_path: str):
+        """Ensures Jellyfin VirtualFolder includes the newly allocated path on expansion drives."""
+        try:
+            token = self.get_jellyfin_token()
+            jf_url = get_jellyfin_url()
+            if not token or not jf_url:
+                return
+
+            vfs = self.get_jellyfin_virtual_folders()
+            matched_vf = None
+            cat_clean = category_or_library.lower()
+
+            for vf in vfs:
+                name = vf.get("Name", "")
+                ctype = (vf.get("CollectionType") or "").lower()
+                locs = vf.get("Locations", [])
+
+                # Already represented in Jellyfin locations
+                for loc in locs:
+                    trans = self.translate_jellyfin_location_to_host(loc)
+                    if host_path in trans or os.path.normpath(host_path) == os.path.normpath(loc):
+                        return
+
+                if cat_clean in name.lower():
+                    matched_vf = vf
+                    break
+                elif (ctype == "tvshows" and any(w in cat_clean for w in ["series", "show", "tv"])) or \
+                     (ctype == "movies" and any(w in cat_clean for w in ["movie", "film"])):
+                    matched_vf = vf
+                    break
+
+            if not matched_vf:
+                return
+
+            vf_name = matched_vf.get("Name")
+            jf_path = host_path
+            roots = self.media_roots
+
+            # Container volume mapping
+            if len(roots) > 1 and host_path.startswith(roots[1]):
+                jf_path = host_path.replace(roots[1], "/data2", 1)
+            elif len(roots) > 0 and host_path.startswith(roots[0]):
+                jf_path = host_path.replace(roots[0], "/data", 1)
+
+            url = (
+                f"{jf_url}/Library/VirtualFolders/Paths?"
+                f"name={urllib.parse.quote(vf_name)}&"
+                f"path={urllib.parse.quote(jf_path)}&"
+                f"refreshLibrary=true"
+            )
+            auth_val = f'MediaBrowser Client="CFlixMediaManager", Device="Server", DeviceId="CFMM", Version="1.0.0", Token="{token}"'
+            headers = {
+                "Authorization": auth_val,
+                "X-Emby-Authorization": auth_val,
+                "X-MediaBrowser-Token": token,
+                "User-Agent": "CFlixMediaManager/1.0"
+            }
+            req = urllib.request.Request(url, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=6) as res:
+                emit_log(f"[Auto-Library] Linked storage location '{jf_path}' into Jellyfin library '{vf_name}'.")
+        except Exception:
+            pass
+
+    def smart_allocate_path(self, category_or_library: str, required_bytes: int = 0, title: Optional[str] = None) -> str:
+        """Dynamically chooses optimal destination storage directory across all available drives (SSDs and HDDs).
+        - Series Affinity: If title belongs to an existing series, keeps episodes together on the same drive if space permits.
+        - Multi-Drive Balancing: Checks all healthy candidate drives across all storage mounts, and selects the drive with the MOST FREE SPACE.
+        - Auto-Overflow: If primary drive or existing show drive is low (< AUTO_OVERFLOW_MIN_GB or > 95% full), overflows to the drive with highest space.
+        """
+        candidates = self.get_candidate_paths_for_library(category_or_library)
+        if not candidates:
+            primary = get_movies_dir() or "/mnt/media_ssd/jellyfin"
+            os.makedirs(primary, exist_ok=True)
+            return primary
+
+        if len(candidates) == 1:
+            os.makedirs(candidates[0], exist_ok=True)
+            return candidates[0]
+
+        overflow_enabled = cfg.get("AUTO_OVERFLOW_ENABLED", True)
+        overflow_min_gb = float(cfg.get("AUTO_OVERFLOW_MIN_GB", 50))
+        overflow_min_bytes = int(overflow_min_gb * (1024**3))
+        buffer_bytes = required_bytes + (5 * 1024 * 1024 * 1024)
+
+        # 1. Series Affinity: Check if series folder already exists on any drive
+        if title:
+            clean_t = "".join(c for c in title if c not in r'\/*?:"<>|').strip()
+            for cand in candidates:
+                show_dir = os.path.join(cand, clean_t)
+                if os.path.exists(show_dir) and os.path.isdir(show_dir):
+                    try:
+                        tot, used, free = shutil.disk_usage(cand)
+                        used_pct = (used / tot * 100) if tot > 0 else 100
+                        if free >= overflow_min_bytes and used_pct < 95.0 and free >= buffer_bytes:
+                            emit_log(
+                                f"[Smart Storage] Series '{clean_t}' exists on '{cand}' "
+                                f"({free/(1024**3):.1f} GB free). Preserving show affinity on this drive."
+                            )
+                            return cand
+                        else:
+                            emit_log(
+                                f"[Smart Storage] Series '{clean_t}' exists on '{cand}', but drive is low "
+                                f"({free/(1024**3):.1f} GB free, {used_pct:.1f}% used). Auto-overflowing to balanced drive."
+                            )
+                    except Exception as e:
+                        emit_log(f"Notice inspecting existing series disk '{cand}': {e}")
+
+        # 2. Query disk stats across all candidate drives
+        stats = []
+        for cand in candidates:
+            check_p = cand
+            while not os.path.exists(check_p) and os.path.dirname(check_p) != check_p:
+                check_p = os.path.dirname(check_p)
+            try:
+                tot, used, free = shutil.disk_usage(check_p)
+                used_pct = (used / tot * 100) if tot > 0 else 100
+                is_healthy = (free >= overflow_min_bytes and used_pct < 95.0 and free >= buffer_bytes)
+                stats.append({
+                    "path": cand,
+                    "total": tot,
+                    "used": used,
+                    "free": free,
+                    "used_pct": used_pct,
+                    "free_gb": free / (1024**3),
+                    "is_healthy": is_healthy
+                })
+            except Exception as e:
+                emit_log(f"Notice inspecting candidate path '{cand}': {e}")
+
+        if not stats:
+            return candidates[0]
+
+        # 3. Multi-Drive Balancing: Select drive with MOST FREE SPACE among healthy candidates
+        healthy = [s for s in stats if s["is_healthy"]]
+        if healthy:
+            healthy.sort(key=lambda x: x["free"], reverse=True)
+            chosen = healthy[0]
+            emit_log(
+                f"[Smart Storage] Multi-drive balanced: Selected drive with most free space '{chosen['path']}' "
+                f"({chosen['free_gb']:.1f} GB free, {chosen['used_pct']:.1f}% used across {len(stats)} candidate drives)"
+            )
+            chosen_path = chosen["path"]
+        else:
+            # Best effort fallback
+            stats.sort(key=lambda x: x["free"], reverse=True)
+            chosen = stats[0]
+            emit_log(
+                f"[Smart Storage] All drives low on space. Selected best-effort drive '{chosen['path']}' "
+                f"({chosen['free_gb']:.1f} GB free, {chosen['used_pct']:.1f}% used)"
+            )
+            chosen_path = chosen["path"]
+
+        try:
+            os.makedirs(chosen_path, exist_ok=True)
+        except Exception as me:
+            emit_log(f"Notice creating directory '{chosen_path}': {me}")
+
+        self.ensure_jellyfin_virtual_folder_path(category_or_library, chosen_path)
+        return chosen_path
+
     def list_all_directories(self) -> List[Dict[str, Any]]:
         """Returns unified list of active media libraries registered in Jellyfin.
-        Merges multi-drive locations (e.g. SSD1 and SSD2) into a single clean library entry.
-        Filters out non-media directories (kavita, manga, boost, books, comics, etc.).
+        Merges multi-drive locations across all storage drives (SSDs and HDDs) into clean library entries.
         """
-        # Fetch live Jellyfin VirtualFolders
         jf_vfs = self.get_jellyfin_virtual_folders()
 
         lib_configs = [
@@ -392,52 +528,46 @@ class DirectoriesManager:
                 "name": "Movies",
                 "display_name": "Movies",
                 "type": "movies",
-                "icon": "🎬",
-                "default_paths": [get_movies_dir() or "/mnt/media_ssd/jellyfin", "/mnt/media_ssd2/movies"]
+                "icon": "🎬"
             },
             {
                 "id": "series",
                 "name": "Shows",
                 "display_name": "TV Series",
                 "type": "series",
-                "icon": "📺",
-                "default_paths": [get_series_dir() or "/mnt/media_ssd/jellyfin_series", "/mnt/media_ssd2/jellyfin_series"]
+                "icon": "📺"
             },
             {
                 "id": "anime",
                 "name": "Anime",
                 "display_name": "Anime",
                 "type": "series",
-                "icon": "⛩️",
-                "default_paths": [get_anime_dir() or "/mnt/media_ssd/Anime", "/mnt/media_ssd2/Anime"]
+                "icon": "⛩️"
             },
             {
                 "id": "adult",
                 "name": "Adult",
                 "display_name": "Adult",
                 "type": "adult",
-                "icon": "🔞",
-                "default_paths": [get_adult_dir() or "/mnt/media_ssd/Adult", "/mnt/media_ssd2/Adult"]
+                "icon": "🔞"
             },
             {
                 "id": "children",
                 "name": "Children",
                 "display_name": "Children",
                 "type": "movies",
-                "icon": "🧸",
-                "default_paths": ["/mnt/media_ssd/Children", "/mnt/media_ssd2/Children"]
+                "icon": "🧸"
             },
             {
                 "id": "eesti_filmid",
                 "name": "Eesti filmid",
                 "display_name": "Eesti filmid",
                 "type": "movies",
-                "icon": "🇪🇪",
-                "default_paths": ["/mnt/media_ssd/Eesti filmid", "/mnt/media_ssd2/Eesti filmid"]
+                "icon": "🇪🇪"
             }
         ]
 
-        # Discover any custom VirtualFolder in Jellyfin not already covered
+        # Discover custom VirtualFolders in Jellyfin
         jf_extra = []
         for vf in jf_vfs:
             name = vf.get("Name", "").strip()
@@ -451,8 +581,7 @@ class DirectoriesManager:
                 "name": name,
                 "display_name": name,
                 "type": "series" if ctype == "tvshows" else "movies",
-                "icon": "🎬",
-                "default_paths": [os.path.join(r, name) for r in self.media_roots]
+                "icon": "🎬"
             })
 
         all_libs = lib_configs + jf_extra
@@ -461,13 +590,10 @@ class DirectoriesManager:
         for lib in all_libs:
             locations = []
             total_items = 0
-            seen_locs = set()
+            candidate_paths = self.get_candidate_paths_for_library(lib["id"])
 
-            for p in lib["default_paths"]:
+            for p in candidate_paths:
                 norm_p = os.path.normpath(p)
-                if norm_p in seen_locs:
-                    continue
-                seen_locs.add(norm_p)
                 exists = os.path.exists(norm_p) and os.path.isdir(norm_p)
                 items = count_media_items(norm_p, lib["type"]) if exists else 0
                 total_items += items
@@ -515,101 +641,124 @@ class DirectoriesManager:
                 "item_count": total_items,
                 "in_jellyfin": True,
                 "multi_drive": multi_drive,
+                "drive_count": len(existing_locs),
                 "locations": locations,
                 "deletable": False
             })
 
         return results
 
-    def smart_allocate_path(self, category_or_library: str, required_bytes: int = 0, title: Optional[str] = None) -> str:
-        """Dynamically chooses optimal destination storage directory across all available SSDs.
-        If primary SSD space is low or full, automatically overflows to the expansion SSD.
-        If title belongs to an existing series, keeps episodes together if space permits.
-        """
-        lib_key = (category_or_library or "").lower().strip()
+    def auto_detect_correct_paths(self, apply_changes: bool = False) -> Dict[str, Any]:
+        """Scans host filesystem and Jellyfin virtual folders to detect active media libraries and fix broken/default paths."""
+        detected = {}
+        changes = {}
+        reasons = []
 
-        # Prioritize explicit library matching without substring collision
-        if any(w in lib_key for w in ["jellyfin_series", "series", "show", "tv"]):
-            candidates = [get_series_dir() or "/mnt/media_ssd/jellyfin_series", "/mnt/media_ssd2/jellyfin_series"]
-        elif "anime" in lib_key:
-            candidates = [get_anime_dir() or "/mnt/media_ssd/Anime", "/mnt/media_ssd2/Anime"]
-        elif "adult" in lib_key:
-            candidates = [get_adult_dir() or "/mnt/media_ssd/Adult", "/mnt/media_ssd2/Adult"]
-        elif "children" in lib_key:
-            candidates = ["/mnt/media_ssd/Children", "/mnt/media_ssd2/Children"]
-        elif "eesti" in lib_key:
-            candidates = ["/mnt/media_ssd/Eesti filmid", "/mnt/media_ssd2/Eesti filmid"]
-        elif any(w in lib_key for w in ["movie", "film"]) or lib_key.rstrip("/").endswith("/jellyfin") or lib_key == "jellyfin":
-            candidates = [get_movies_dir() or "/mnt/media_ssd/jellyfin", "/mnt/media_ssd2/movies"]
-        elif os.path.isabs(category_or_library) and os.path.exists(category_or_library):
-            if "/mnt/media_ssd2" in category_or_library:
-                return category_or_library
-            basename = os.path.basename(category_or_library.rstrip("/"))
-            candidates = [category_or_library, f"/mnt/media_ssd2/{basename}"]
+        current_paths = {
+            "MOVIES_DIR": get_movies_dir(),
+            "SERIES_DIR": get_series_dir(),
+            "ANIME_DIR": get_anime_dir(),
+            "ADULT_DIR": get_adult_dir(),
+            "WATCH_DIR": get_watch_dir(),
+            "MEDIA_ROOT": cfg.get("MEDIA_ROOT")
+        }
+
+        # Candidate pools
+        # --- MOVIES_DIR ---
+        movie_candidates = self.get_candidate_paths_for_library("movies")
+        best_movies = None
+        max_movie_items = -1
+        for p in movie_candidates:
+            if os.path.exists(p) and os.path.isdir(p):
+                cnt = count_media_items(p, "movies")
+                if cnt > max_movie_items:
+                    max_movie_items = cnt
+                    best_movies = p
+        detected["MOVIES_DIR"] = best_movies or current_paths["MOVIES_DIR"] or (movie_candidates[0] if movie_candidates else "/media/movies")
+
+        # --- SERIES_DIR ---
+        series_candidates = self.get_candidate_paths_for_library("series")
+        best_series = None
+        max_series_items = -1
+        for p in series_candidates:
+            if os.path.exists(p) and os.path.isdir(p):
+                cnt = count_media_items(p, "series")
+                if cnt > max_series_items:
+                    max_series_items = cnt
+                    best_series = p
+        detected["SERIES_DIR"] = best_series or current_paths["SERIES_DIR"] or (series_candidates[0] if series_candidates else "/media/tv")
+
+        # --- ANIME_DIR ---
+        anime_candidates = self.get_candidate_paths_for_library("anime")
+        best_anime = None
+        for p in anime_candidates:
+            if os.path.exists(p) and os.path.isdir(p):
+                best_anime = p
+                break
+        detected["ANIME_DIR"] = best_anime or current_paths["ANIME_DIR"] or (anime_candidates[0] if anime_candidates else "/media/anime")
+
+        # --- ADULT_DIR ---
+        adult_candidates = self.get_candidate_paths_for_library("adult")
+        best_adult = None
+        for p in adult_candidates:
+            if os.path.exists(p) and os.path.isdir(p):
+                best_adult = p
+                break
+        detected["ADULT_DIR"] = best_adult or current_paths["ADULT_DIR"] or (adult_candidates[0] if adult_candidates else "/media/adult")
+
+        # --- WATCH_DIR ---
+        watch_candidates = []
+        curr_w = current_paths["WATCH_DIR"]
+        if curr_w and os.path.exists(curr_w) and curr_w not in ["/downloads", "/media/downloads"]:
+            watch_candidates.append(curr_w)
+        home = os.path.expanduser("~")
+        generic_watch = [os.path.join(home, "dwhelper"), os.path.join(home, "Downloads"), "/downloads", "/var/downloads"]
+        for p in generic_watch:
+            if os.path.exists(p) and os.path.isdir(p):
+                watch_candidates.append(p)
+        default_fallback = os.path.join(home, "dwhelper") if os.path.exists(os.path.join(home, "dwhelper")) else (watch_candidates[0] if watch_candidates else "/downloads")
+        detected["WATCH_DIR"] = watch_candidates[0] if watch_candidates else (current_paths["WATCH_DIR"] or default_fallback)
+
+        # --- MEDIA_ROOT ---
+        if self.media_roots:
+            detected["MEDIA_ROOT"] = self.media_roots[0]
         else:
-            candidates = [get_movies_dir() or "/mnt/media_ssd/jellyfin", "/mnt/media_ssd2/movies"]
+            detected["MEDIA_ROOT"] = "/media"
 
-        primary_path = candidates[0]
-        expansion_path = candidates[1] if len(candidates) > 1 else primary_path
+        for k, new_v in detected.items():
+            old_v = current_paths.get(k)
+            if old_v != new_v:
+                changes[k] = {"old": old_v, "new": new_v}
+                reasons.append(f"Updated {k} from '{old_v}' to '{new_v}'")
 
-        # 1. Check if series/anime already exists on one of the drives
-        if title:
-            clean_t = "".join(c for c in title if c not in r'\/*?:"<>|').strip()
-            prim_show = os.path.join(primary_path, clean_t)
-            exp_show = os.path.join(expansion_path, clean_t)
-            if os.path.exists(prim_show):
-                try:
-                    _, _, free_b = shutil.disk_usage(primary_path)
-                    if free_b >= required_bytes + (2 * 1024 * 1024 * 1024):
-                        return primary_path
-                except Exception:
-                    pass
-            elif os.path.exists(exp_show):
-                try:
-                    _, _, free_b = shutil.disk_usage(expansion_path)
-                    if free_b >= required_bytes + (2 * 1024 * 1024 * 1024):
-                        return expansion_path
-                except Exception:
-                    pass
+        if apply_changes and changes:
+            to_update = {k: v["new"] for k, v in changes.items()}
+            cfg.update(to_update)
+            emit_log(f"Auto-fixed {len(changes)} media storage paths: {', '.join(changes.keys())}")
 
-        # 2. Check auto-overflow settings & primary drive capacity
-        overflow_enabled = cfg.get("AUTO_OVERFLOW_ENABLED", True)
-        if overflow_enabled and len(candidates) > 1:
-            overflow_min_gb = float(cfg.get("AUTO_OVERFLOW_MIN_GB", 50))
-            overflow_min_bytes = int(overflow_min_gb * (1024**3))
-            try:
-                check_path = primary_path
-                while not os.path.exists(check_path) and os.path.dirname(check_path) != check_path:
-                    check_path = os.path.dirname(check_path)
-                if not os.path.exists(check_path):
-                    check_path = "/"
+        return {
+            "success": True,
+            "detected_paths": detected,
+            "previous_paths": current_paths,
+            "changes_count": len(changes),
+            "changes": changes,
+            "reasons": reasons,
+            "applied": apply_changes
+        }
 
-                total_b, used_b, free_b = shutil.disk_usage(check_path)
-                used_pct = (used_b / total_b * 100) if total_b > 0 else 100
-                is_full = (
-                    free_b <= overflow_min_bytes
-                    or used_pct >= 95.0
-                    or free_b < (required_bytes + (5 * 1024 * 1024 * 1024))
-                )
-                if is_full:
-                    try:
-                        os.makedirs(expansion_path, exist_ok=True)
-                    except Exception as me:
-                        emit_log(f"Notice creating expansion dir: {me}")
-                    free_gb = free_b / (1024**3)
-                    emit_log(
-                        f"[Smart Storage] Primary SSD space low ({free_gb:.1f} GB left / threshold {overflow_min_gb:.0f} GB). "
-                        f"Auto-allocating upload to expansion SSD: '{expansion_path}'"
-                    )
-                    return expansion_path
-            except Exception as e:
-                emit_log(f"Notice in smart storage check: {e}")
+    @property
+    def media_root(self) -> str:
+        roots = self.media_roots
+        return roots[0] if roots else cfg.get("MEDIA_ROOT", "/media")
 
-        try:
-            os.makedirs(primary_path, exist_ok=True)
-        except Exception as me:
-            emit_log(f"Notice creating primary dir: {me}")
-        return primary_path
+    def get_available_parent_locations(self) -> List[Dict[str, str]]:
+        """Returns list of selectable parent directories across all storage drives for creating new folders."""
+        locations = []
+        for r in self.media_roots:
+            basename = os.path.basename(r)
+            display = f"{basename} ({r})" if basename else r
+            locations.append({"path": r, "name": display})
+        return locations
 
     def create_directory(self, folder_name: str, content_type: str = "movies", add_to_jellyfin: bool = True, parent_path: Optional[str] = None) -> Dict[str, Any]:
         """Creates a new filesystem directory in the chosen parent disk/root and optionally links it to Jellyfin."""
@@ -617,9 +766,8 @@ class DirectoriesManager:
         if not folder_name or any(c in folder_name for c in [":", "..", "*", "?", "<", ">", "|"]):
             return {"success": False, "error": "Invalid directory name. Special characters are not allowed."}
 
-        # Resolve parent base
         base = self.media_root
-        if parent_path and os.path.exists(parent_path) and os.path.isdir(parent_path):
+        if parent_path and os.path.exists(parent_path) and os.path.isdir(parent_path) and not is_excluded_path(parent_path):
             base = os.path.normpath(parent_path)
 
         target_path = os.path.normpath(os.path.join(base, folder_name))
@@ -634,14 +782,15 @@ class DirectoriesManager:
             emit_log(f"Failed to create directory '{target_path}': {e}")
             return {"success": False, "error": f"Failed to create directory: {str(e)}"}
 
-        # Optional Jellyfin VirtualFolder creation
         if add_to_jellyfin and get_jellyfin_url():
             token = self.get_jellyfin_token()
             if token:
                 media_path_prefix = cfg.get("JELLYFIN_MEDIA_PATH", "/media")
-                rel_from_base = os.path.relpath(target_path, cfg.get("MEDIA_ROOT", "/media"))
-                if not rel_from_base.startswith(".."):
-                    jf_container_path = f"{media_path_prefix.rstrip('/')}/{rel_from_base}"
+                roots = self.media_roots
+                if len(roots) > 1 and target_path.startswith(roots[1]):
+                    jf_container_path = target_path.replace(roots[1], "/data2", 1)
+                elif len(roots) > 0 and target_path.startswith(roots[0]):
+                    jf_container_path = target_path.replace(roots[0], "/data", 1)
                 else:
                     jf_container_path = target_path
 
@@ -684,12 +833,10 @@ class DirectoriesManager:
         """Deletes a directory from filesystem and unlinks it from Jellyfin."""
         folder_name = folder_name.strip()
         
-        # Locate target path
         target_path = None
         if path and os.path.exists(path):
             target_path = os.path.normpath(path)
         else:
-            # Match from list
             all_dirs = self.list_all_directories()
             for d in all_dirs:
                 if d["name"].lower() == folder_name.lower() or d["path"].lower() == folder_name.lower():
@@ -699,15 +846,13 @@ class DirectoriesManager:
             if not target_path:
                 target_path = os.path.normpath(os.path.join(self.media_root, folder_name))
 
-        # Security check: never delete system roots or storage roots
-        if target_path in SYSTEM_ROOTS or target_path in self.media_roots:
-            return {"success": False, "error": f"Cannot delete core root filesystem path '{target_path}'."}
+        if target_path in SYSTEM_ROOTS or target_path in self.media_roots or is_excluded_path(target_path):
+            return {"success": False, "error": f"Cannot delete core root or protected path '{target_path}'."}
 
         base_name = os.path.basename(target_path)
         if base_name.lower() in PROTECTED_NAMES:
             return {"success": False, "error": f"Cannot delete core protected directory '{base_name}'."}
 
-        # 1. Remove from media server if requested
         if remove_from_jellyfin and get_jellyfin_url():
             token = self.get_jellyfin_token()
             if token:
@@ -727,7 +872,6 @@ class DirectoriesManager:
                 except Exception as e:
                     emit_log(f"Notice: Remove library returned: {e}")
 
-        # 2. Remove from filesystem
         if os.path.exists(target_path):
             try:
                 entries = [e for e in os.listdir(target_path) if not e.startswith(".")]

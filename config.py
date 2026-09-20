@@ -1,8 +1,10 @@
 import os
 import json
+import shutil
 import urllib.request
 import urllib.parse
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
+import uuid
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -36,14 +38,18 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "ANIME_DIR": os.environ.get("ANIME_DIR", "/media/anime"),
     "ADULT_DIR": os.environ.get("ADULT_DIR", "/media/adult"),
     "MEDIA_ROOT": os.environ.get("MEDIA_ROOT", "/media"),
-    "JELLYFIN_MEDIA_PATH": os.environ.get("JELLYFIN_MEDIA_PATH", "/media"),
+    "MEDIA_ROOTS": os.environ.get("MEDIA_ROOTS", ""),
+    "JELLYFIN_MEDIA_PATH": os.environ.get("JELLYFIN_MEDIA_PATH", "/data"),
     "WATCH_DIR": os.environ.get("WATCH_DIR", "/downloads"),
     "STAGING_DIR": os.environ.get("STAGING_DIR", "/downloads/.staging"),
     "UPLOAD_TMP_DIR": os.environ.get("UPLOAD_TMP_DIR", "/tmp/cfmm_uploads"),
-    "WATCHER_ENABLED": os.environ.get("WATCHER_ENABLED", "true").lower() == "true",
-    "WATCHER_INTERVAL": int(os.environ.get("WATCHER_INTERVAL", 10)),
-    "AUTO_OVERFLOW_ENABLED": os.environ.get("AUTO_OVERFLOW_ENABLED", "true").lower() == "true",
-    "AUTO_OVERFLOW_MIN_GB": int(os.environ.get("AUTO_OVERFLOW_MIN_GB", 50))
+    "WATCHER_ENABLED": True,
+    "WATCHER_INTERVAL": 10,
+    "AUTO_OVERFLOW_ENABLED": True,
+    "AUTO_OVERFLOW_MIN_GB": 50,
+    "STORAGE_ALLOCATION_STRATEGY": "most_free_space",
+    "SERVERS": [],
+    "ACTIVE_SERVER_ID": "server-local"
 }
 
 class ConfigManager:
@@ -56,17 +62,55 @@ class ConfigManager:
             try:
                 with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                     saved = json.load(f)
-                    # Merge with defaults so new fields are never missing
                     merged = dict(DEFAULT_SETTINGS)
                     merged.update(saved)
                     self._settings = merged
+                    self._ensure_servers_profile()
                     return
             except Exception as e:
                 print(f"[CFMM] Error loading {SETTINGS_FILE}: {e}")
         
-        # If file doesn't exist or failed to load, initialize with defaults
         self._settings = dict(DEFAULT_SETTINGS)
+        self._ensure_servers_profile()
         self.save()
+
+    def _ensure_servers_profile(self):
+        servers = self._settings.get("SERVERS")
+        if not servers or not isinstance(servers, list):
+            local_srv = {
+                "id": "server-local",
+                "name": "Home Server",
+                "url": self._settings.get("JELLYFIN_URL", ""),
+                "user": self._settings.get("JELLYFIN_USER", ""),
+                "pass": self._settings.get("JELLYFIN_PASS", ""),
+                "movies_dir": self._settings.get("MOVIES_DIR", "/mnt/media_ssd/jellyfin"),
+                "series_dir": self._settings.get("SERIES_DIR", "/mnt/media_ssd/jellyfin_series"),
+                "anime_dir": self._settings.get("ANIME_DIR", "/mnt/media_ssd/Anime"),
+                "adult_dir": self._settings.get("ADULT_DIR", "/mnt/media_ssd/Adult"),
+                "media_roots": self._settings.get("MEDIA_ROOTS", ""),
+                "watch_dir": self._settings.get("WATCH_DIR", "/home/gallo/dwhelper"),
+                "jellyfin_media_path": self._settings.get("JELLYFIN_MEDIA_PATH", "/data")
+            }
+            friend_srv = {
+                "id": "server-friend",
+                "name": "Hekafin (Friend's Server)",
+                "url": "http://100.98.209.40:8096",
+                "user": "",
+                "pass": "",
+                "movies_dir": "/mnt/das1/movies",
+                "series_dir": "/mnt/das1/shows",
+                "anime_dir": "/mnt/das1/anime",
+                "adult_dir": "/mnt/das1/adult",
+                "media_roots": "/mnt/das1,/mnt/das2",
+                "watch_dir": "/mnt/das1/incoming",
+                "jellyfin_media_path": "/media"
+            }
+            self._settings["SERVERS"] = [local_srv, friend_srv]
+            self._settings["ACTIVE_SERVER_ID"] = "server-local"
+            self.save()
+        elif not self._settings.get("ACTIVE_SERVER_ID"):
+            self._settings["ACTIVE_SERVER_ID"] = servers[0].get("id", "server-local")
+            self.save()
 
     def save(self):
         try:
@@ -75,17 +119,141 @@ class ConfigManager:
         except Exception as e:
             print(f"[CFMM] Error saving {SETTINGS_FILE}: {e}")
 
+    def get_media_roots(self) -> List[str]:
+        raw = self.get("MEDIA_ROOTS", "")
+        if isinstance(raw, str):
+            return [r.strip() for r in raw.split(",") if r.strip()]
+        elif isinstance(raw, (list, tuple)):
+            return [str(r).strip() for r in raw if str(r).strip()]
+        return []
+
+    def get_active_server_id(self) -> str:
+        return self._settings.get("ACTIVE_SERVER_ID", "server-local")
+
+    def get_active_server(self) -> Dict[str, Any]:
+        self._ensure_servers_profile()
+        active_id = self.get_active_server_id()
+        for s in self._settings.get("SERVERS", []):
+            if s.get("id") == active_id:
+                return s
+        servers = self._settings.get("SERVERS", [])
+        return servers[0] if servers else {}
+
+    def get_servers(self, sanitize: bool = True) -> List[Dict[str, Any]]:
+        self._ensure_servers_profile()
+        res = []
+        for s in self._settings.get("SERVERS", []):
+            item = dict(s)
+            if sanitize:
+                item["has_pass"] = bool(item.get("pass"))
+                item.pop("pass", None)
+            res.append(item)
+        return res
+
+    def switch_active_server(self, server_id: str) -> bool:
+        self._ensure_servers_profile()
+        for s in self._settings.get("SERVERS", []):
+            if s.get("id") == server_id:
+                self._settings["ACTIVE_SERVER_ID"] = server_id
+                self.save()
+                return True
+        return False
+
+    def save_server(self, server_data: Dict[str, Any]) -> Dict[str, Any]:
+        self._ensure_servers_profile()
+        sid = server_data.get("id")
+        if not sid:
+            sid = f"server-{uuid.uuid4().hex[:8]}"
+            server_data["id"] = sid
+
+        if "url" in server_data and server_data["url"]:
+            server_data["url"] = normalize_jellyfin_url(server_data["url"])
+
+        servers = self._settings.get("SERVERS", [])
+        updated = False
+        for idx, s in enumerate(servers):
+            if s.get("id") == sid:
+                # If password not provided in update, retain existing password
+                if "pass" not in server_data or server_data["pass"] is None or server_data["pass"] == "":
+                    server_data["pass"] = s.get("pass", "")
+                servers[idx] = server_data
+                updated = True
+                break
+
+        if not updated:
+            servers.append(server_data)
+
+        self._settings["SERVERS"] = servers
+        # If currently active, ensure active references match
+        if self._settings.get("ACTIVE_SERVER_ID") == sid:
+            for k in ("url", "user", "pass", "movies_dir", "series_dir", "anime_dir", "adult_dir", "media_roots", "watch_dir", "jellyfin_media_path"):
+                if k in server_data:
+                    self._settings[k.upper()] = server_data[k]
+
+        self.save()
+        return server_data
+
+    def delete_server(self, server_id: str) -> bool:
+        self._ensure_servers_profile()
+        servers = self._settings.get("SERVERS", [])
+        if len(servers) <= 1:
+            return False  # Do not delete the only server profile
+        new_servers = [s for s in servers if s.get("id") != server_id]
+        if len(new_servers) == len(servers):
+            return False
+        self._settings["SERVERS"] = new_servers
+        if self._settings.get("ACTIVE_SERVER_ID") == server_id:
+            self._settings["ACTIVE_SERVER_ID"] = new_servers[0].get("id")
+        self.save()
+        return True
+
     def get(self, key: str, default: Any = None) -> Any:
+        active = self.get_active_server()
+        mapping = {
+            "JELLYFIN_URL": "url",
+            "JELLYFIN_USER": "user",
+            "JELLYFIN_PASS": "pass",
+            "MOVIES_DIR": "movies_dir",
+            "SERIES_DIR": "series_dir",
+            "ANIME_DIR": "anime_dir",
+            "ADULT_DIR": "adult_dir",
+            "MEDIA_ROOTS": "media_roots",
+            "WATCH_DIR": "watch_dir",
+            "JELLYFIN_MEDIA_PATH": "jellyfin_media_path"
+        }
+        if key in mapping:
+            field = mapping[key]
+            if field in active and active[field] is not None:
+                val = active[field]
+                if val != "":
+                    return val
         return self._settings.get(key, default)
 
     def set(self, key: str, value: Any):
         if key == "JELLYFIN_URL" and isinstance(value, str):
             value = normalize_jellyfin_url(value)
         self._settings[key] = value
+        
+        # Update in active server profile as well if applicable
+        active = self.get_active_server()
+        mapping = {
+            "JELLYFIN_URL": "url",
+            "JELLYFIN_USER": "user",
+            "JELLYFIN_PASS": "pass",
+            "MOVIES_DIR": "movies_dir",
+            "SERIES_DIR": "series_dir",
+            "ANIME_DIR": "anime_dir",
+            "ADULT_DIR": "adult_dir",
+            "MEDIA_ROOTS": "media_roots",
+            "WATCH_DIR": "watch_dir",
+            "JELLYFIN_MEDIA_PATH": "jellyfin_media_path"
+        }
+        if key in mapping and active:
+            active[mapping[key]] = value
+
         self.save()
 
     def update(self, new_settings: Dict[str, Any]) -> Dict[str, Any]:
-        # Filter and sanitize
         allowed_keys = set(DEFAULT_SETTINGS.keys())
         for k, v in new_settings.items():
             if k in allowed_keys:
@@ -97,7 +265,6 @@ class ConfigManager:
                 elif k in ("WATCHER_ENABLED", "AUTO_OVERFLOW_ENABLED"):
                     self._settings[k] = bool(v)
                 elif isinstance(v, str):
-                    # Clean trailing slashes for paths and URLs
                     v_clean = v.strip()
                     if k.endswith("_DIR") or k in ("MEDIA_ROOT", "JELLYFIN_MEDIA_PATH"):
                         if v_clean and not v_clean.startswith("/") and not v_clean.startswith("\\"):
@@ -155,7 +322,6 @@ class ConfigManager:
                         "message": f"Successfully connected to media server as '{user_name}'!"
                     }
             except urllib.error.HTTPError as e:
-                # If credentials are wrong, don't fallback to /jellyfin candidate and return 404
                 if e.code == 401:
                     return {"success": False, "error": "Invalid username or password on media server."}
                 if e.code in (404, 302, 301) and target_url != candidates[-1]:
@@ -198,14 +364,87 @@ def get_adult_dir() -> str:
 def get_media_root() -> str:
     return cfg.get("MEDIA_ROOT", "/media")
 
+def get_media_roots() -> List[str]:
+    raw = cfg.get("MEDIA_ROOTS", "")
+    if isinstance(raw, str):
+        return [r.strip() for r in raw.split(",") if r.strip()]
+    elif isinstance(raw, (list, tuple)):
+        return [str(r).strip() for r in raw if str(r).strip()]
+    return []
+
 def get_watch_dir() -> str:
     return cfg.get("WATCH_DIR", "/downloads")
 
 def get_staging_dir() -> str:
-    return cfg.get("STAGING_DIR", "/downloads/.staging")
+    target = cfg.get("STAGING_DIR", "/downloads/.staging")
+    try:
+        check = target
+        while not os.path.exists(check) and os.path.dirname(check) != check:
+            check = os.path.dirname(check)
+        if os.path.exists(check):
+            _, _, free = shutil.disk_usage(check)
+            if free > 15 * (1024**3):
+                os.makedirs(target, exist_ok=True)
+                return target
+    except Exception:
+        pass
+
+    try:
+        from directories_manager import directories_mgr
+        roots = directories_mgr.media_roots
+        best_cand = None
+        max_free = 0
+        for r in roots:
+            if os.path.exists(r):
+                _, _, f = shutil.disk_usage(r)
+                if f > max_free:
+                    max_free = f
+                    best_cand = os.path.join(r, ".staging")
+        if best_cand and max_free > 15 * (1024**3):
+            os.makedirs(best_cand, exist_ok=True)
+            return best_cand
+    except Exception:
+        pass
+
+    try:
+        os.makedirs(target, exist_ok=True)
+        return target
+    except Exception:
+        fallback = "/tmp/cfmm_staging"
+        os.makedirs(fallback, exist_ok=True)
+        return fallback
 
 def get_upload_tmp_dir() -> str:
     tmp_dir = cfg.get("UPLOAD_TMP_DIR", "/tmp/cfmm_uploads")
+    try:
+        check = tmp_dir
+        while not os.path.exists(check) and os.path.dirname(check) != check:
+            check = os.path.dirname(check)
+        if os.path.exists(check):
+            _, _, free = shutil.disk_usage(check)
+            if free > 15 * (1024**3):
+                os.makedirs(tmp_dir, exist_ok=True)
+                return tmp_dir
+    except Exception:
+        pass
+
+    try:
+        from directories_manager import directories_mgr
+        roots = directories_mgr.media_roots
+        best_cand = None
+        max_free = 0
+        for r in roots:
+            if os.path.exists(r):
+                _, _, f = shutil.disk_usage(r)
+                if f > max_free:
+                    max_free = f
+                    best_cand = os.path.join(r, ".tmp_uploads")
+        if best_cand and max_free > 15 * (1024**3):
+            os.makedirs(best_cand, exist_ok=True)
+            return best_cand
+    except Exception:
+        pass
+
     try:
         os.makedirs(tmp_dir, exist_ok=True)
         return tmp_dir

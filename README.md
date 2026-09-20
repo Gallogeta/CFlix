@@ -81,11 +81,14 @@ flowchart LR
   * **Unauthorized Users**: Access is strictly denied with HTTP 401/403.
 * Hardened security stack: HTTPOnly and SameSite session cookies, brute-force rate limiting, and security headers (`nosniff`, `SAMEORIGIN`).
 
-### 6. 💾 Smart Multi-SSD Auto-Overflow Storage Manager
-* **Multi-Drive Pooling**: Seamlessly pools storage across multiple SSDs/HDDs (e.g. Primary `/mnt/media_ssd` and Expansion `/mnt/media_ssd2`).
-* **Auto-Overflow Routing**: Automatically routes new movie and episode uploads to expansion drives when the primary SSD drops below a user-configurable free space threshold (e.g., 50GB / 150GB or 95% full).
-* **Episode Clustering**: Intelligently inspects disk contents and clusters new TV show episodes onto the drive where prior seasons/episodes already reside as long as safe headroom exists.
-* **Unified Library Views**: Merges multi-disk storage paths into single logical Jellyfin library targets (Movies, TV Series, Anime, Adult, Children, Regional) while filtering out unused non-media directories (`kavita`, `manga`, `boost`, `books`, `comics`).
+### 6. 💾 Smart Multi-Drive Storage Manager (SSDs & HDDs)
+* **Universal Multi-Drive Pooling**: Seamlessly pools storage across any number of media drives (1, 2, 3, 5, 10+ drives) with arbitrary names (e.g. `/mnt/hdd1`, `/mnt/hdd2`, `/mnt/media_ssd2`, `/mnt/storage`, etc.).
+* **Dynamic Drive Auto-Discovery**: Automatically discovers mounted media disks and pulls storage paths directly from Jellyfin VirtualFolders, with optional `MEDIA_ROOTS` override in settings.
+* **Intelligent Multi-Drive Balancing**: Automatically evaluates available capacity across all healthy drives and routes new movies and shows to the drive with the **most available free space**.
+* **Auto-Overflow Headroom Protection**: When a primary drive drops below a user-configurable free space threshold (e.g., 50GB or 95% full), CFMM seamlessly overflows writes to the expansion drive with the largest available space.
+* **Series Episode Affinity**: Intelligently clusters episodes of the same TV show onto the drive where earlier seasons reside as long as healthy storage headroom exists, preventing show fragmentation.
+* **Automatic Jellyfin VirtualFolder Linking**: If an upload creates folders on an expansion drive, CFMM automatically registers the new path with Jellyfin's API so the media appears in your libraries immediately.
+* **Unified Library Views**: Merges multi-disk storage paths across all drives into single logical Jellyfin library targets (Movies, TV Series, Anime, Adult, Children, Regional) with per-disk health metrics.
 
 ### 7. 🎨 On-The-Fly Theme & Skin Engine
 * **Instant CSS Injection**: Switch Jellyfin themes or inject custom stylesheets directly across all connected clients with zero server downtime.
@@ -95,6 +98,25 @@ flowchart LR
 ### 8. 📊 Real-Time Live Activity Console & Multi-Disk Dashboard
 * **SSE Live Stream**: Real-time Server-Sent Events (SSE) broadcast active FFmpeg tagging, moves, and watcher operations to the UI console.
 * **Multi-Disk Storage Telemetry**: Real-time storage overview tracking capacity, utilized space, and remaining headroom across all host mounts and media drives.
+
+### 9. 🌐 Multi-Server Connection Engine & Server Switcher
+* **Switch Servers in 1 Click**: Manage multiple Jellyfin media servers (e.g. Home Server, Remote Friend Server over Tailscale / LAN) from a single CFMM interface.
+* **Independent Profiles & Paths**: Each server maintains its own URL, credentials, movies/series paths, media roots, and incoming monitored folders.
+* **Handshake Verification**: Built-in "Test Handshake" verifies connectivity, authentication, and permissions prior to saving server profiles.
+* **Fast Active Target Switching**: Instantly switches active upload targets, collection managers, and directory monitors on the fly without logging out.
+
+---
+
+## 🔄 Updating an Existing Installation
+
+If you or a friend already have CFMM running, update to the latest version with:
+
+```bash
+cd ~/cfmm  # or path to your CFlix/CFMM directory
+git pull
+docker compose down
+docker compose up -d --build
+```
 
 ---
 

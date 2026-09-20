@@ -155,17 +155,24 @@ async def index_handler(request):
 @routes.get("/api/auth/me")
 async def auth_me_handler(request):
     user = get_current_user(request)
+    servers = cfg.get_servers(sanitize=True)
+    active_id = cfg.get_active_server_id()
     if user:
         return web.json_response({
             "authenticated": True,
             "username": user.get("username", "User"),
             "is_admin": bool(user.get("is_admin", False)),
             "can_manage": bool(user.get("can_manage", False)),
-            "server_url": get_jellyfin_url()
+            "server_url": get_jellyfin_url(),
+            "active_id": active_id,
+            "servers": servers
         })
     return web.json_response({
         "authenticated": False,
-        "server_configured": bool(get_jellyfin_url())
+        "server_configured": bool(get_jellyfin_url()),
+        "server_url": get_jellyfin_url(),
+        "active_id": active_id,
+        "servers": servers
     })
 
 @routes.post("/api/auth/login")
@@ -231,11 +238,21 @@ async def auth_login_handler(request):
             "error": "Access denied: Your account does not have media management or upload permissions on this server."
         }, status=403)
 
-    # Persist the verified working resolved URL
+    # Persist the verified working resolved URL & match active server profile
     resolved_url = auth_res.get("resolved_url")
-    if resolved_url and resolved_url != get_jellyfin_url():
-        cfg.set("JELLYFIN_URL", resolved_url)
-        emit_log(f"Media server URL verified and updated: {resolved_url}")
+    if resolved_url:
+        matched = False
+        for s in cfg._settings.get("SERVERS", []):
+            if normalize_jellyfin_url(s.get("url", "")) == normalize_jellyfin_url(resolved_url):
+                cfg.switch_active_server(s.get("id"))
+                if username: s["user"] = username
+                if password: s["pass"] = password
+                cfg.save()
+                matched = True
+                break
+        if not matched and resolved_url != get_jellyfin_url():
+            cfg.set("JELLYFIN_URL", resolved_url)
+            emit_log(f"Media server URL verified and updated: {resolved_url}")
 
     session_token = secrets.token_urlsafe(32)
     SESSIONS[session_token] = {
@@ -430,6 +447,43 @@ async def upload_chunk_handler(request):
             "total_chunks": total_chunks
         })
 
+@routes.post("/api/upload/cancel")
+async def cancel_upload_handler(request):
+    data = {}
+    try:
+        data = await request.json()
+    except Exception:
+        pass
+
+    upload_id = data.get("upload_id")
+    temp_path = data.get("temp_path")
+
+    if upload_id:
+        clean_id = "".join(c for c in str(upload_id) if c.isalnum() or c in ("-", "_"))
+        temp_dir = get_upload_tmp_dir()
+        chunk_dir = os.path.join(temp_dir, f"chunks_{clean_id}")
+        if os.path.exists(chunk_dir):
+            try:
+                shutil.rmtree(chunk_dir, ignore_errors=True)
+            except Exception:
+                pass
+        try:
+            for f in os.listdir(temp_dir):
+                if f.startswith(f"up_{clean_id}_"):
+                    os.remove(os.path.join(temp_dir, f))
+        except Exception:
+            pass
+        UPLOAD_LOCKS.pop(clean_id, None)
+
+    if temp_path and os.path.exists(temp_path):
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
+
+    emit_log(f"Upload cancelled by user (Upload ID: {upload_id or 'unknown'}). Intermediate chunks purged.")
+    return web.json_response({"success": True, "message": "Upload cancelled and temporary files removed."})
+
 @routes.post("/api/clean-title")
 async def clean_title_handler(request):
     data = await request.json()
@@ -503,7 +557,10 @@ async def process_handler(request):
 
 @routes.get("/api/incoming")
 async def incoming_handler(request):
-    watch_dir = get_watch_dir()
+    req_folder = request.query.get("folder")
+    watch_dir = req_folder.strip() if (req_folder and req_folder.strip()) else None
+    if not watch_dir:
+        watch_dir = get_watch_dir()
     if not os.path.exists(watch_dir):
         return web.json_response([])
 
@@ -546,6 +603,81 @@ async def sync_collections_handler(request):
     res = await loop.run_in_executor(None, collections_mgr.sync_all_collections)
     return web.json_response(res)
 
+@routes.post("/api/collections/sync-one")
+async def sync_single_collection_handler(request):
+    data = await request.json()
+    cid = data.get("collection_id")
+    if not cid:
+        return web.json_response({"success": False, "error": "Missing collection_id"})
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, collections_mgr.sync_single_collection_by_id, cid)
+    return web.json_response(res)
+
+@routes.post("/api/collections/clean-placeholders")
+async def clean_placeholders_handler(request):
+    loop = asyncio.get_event_loop()
+    purged = await loop.run_in_executor(None, collections_mgr.clean_redundant_placeholders)
+    return web.json_response({"success": True, "purged_count": purged})
+
+@routes.get("/api/watcher/folders")
+async def watcher_folders_handler(request):
+    current = get_watch_dir()
+    home = os.path.expanduser("~")
+    candidates = [
+        current,
+        os.path.join(home, "dwhelper"),
+        os.path.join(home, "Downloads"),
+        "/downloads",
+        "/mnt/incoming",
+        "/mnt/downloads"
+    ]
+    # Dynamically discover incoming/downloads folders across all active media roots / drives
+    for root in cfg.get_media_roots():
+        if os.path.isdir(root):
+            for sub in ["incoming", "downloads", "dwhelper"]:
+                p = os.path.join(root, sub)
+                if os.path.isdir(p):
+                    candidates.append(p)
+    existing = []
+    seen = set()
+    for c_path in candidates:
+        if c_path and c_path not in seen and os.path.isdir(c_path):
+            seen.add(c_path)
+            existing.append(c_path)
+    if current and current not in seen:
+        existing.insert(0, current)
+    return web.json_response({"current": current, "folders": existing, "enabled": watcher.enabled})
+
+@routes.post("/api/watcher/set-folder")
+async def watcher_set_folder_handler(request):
+    data = await request.json()
+    folder = (data.get("folder") or "").strip()
+    create_if_missing = data.get("create_if_missing", False)
+
+    if not folder:
+        return web.json_response({"success": False, "error": "Folder path cannot be empty."})
+
+    if not os.path.exists(folder):
+        if create_if_missing:
+            try:
+                os.makedirs(folder, exist_ok=True)
+            except Exception as e:
+                return web.json_response({"success": False, "error": f"Failed to create directory: {e}"})
+        else:
+            return web.json_response({"success": False, "error": f"Directory does not exist: {folder}"})
+
+    cfg.set("WATCH_DIR", folder)
+    cfg.save()
+    emit_log(f"Monitored incoming folder updated to: {folder}")
+
+    try:
+        f_list = [f for f in os.listdir(folder) if f.lower().endswith((".mp4", ".mkv", ".avi", ".mov")) and not f.startswith(".")]
+        f_count = len(f_list)
+    except Exception:
+        f_count = 0
+
+    return web.json_response({"success": True, "watch_dir": folder, "file_count": f_count})
+
 @routes.post("/api/watcher/toggle")
 async def watcher_toggle_handler(request):
     data = await request.json()
@@ -557,6 +689,87 @@ async def watcher_toggle_handler(request):
 async def refresh_library_handler(request):
     loop = asyncio.get_event_loop()
     ok = await loop.run_in_executor(None, trigger_jellyfin_refresh)
+# --- Multi-Server Management Endpoints ---
+@routes.get("/api/servers")
+async def get_servers_handler(request):
+    servers = cfg.get_servers(sanitize=True)
+    active_id = cfg.get_active_server_id()
+    return web.json_response({"active_id": active_id, "servers": servers})
+
+@routes.post("/api/servers/switch")
+async def switch_server_handler(request):
+    data = await request.json()
+    server_id = data.get("server_id")
+    if not server_id:
+        return web.json_response({"success": False, "error": "Missing server_id"})
+
+    ok = cfg.switch_active_server(server_id)
+    if not ok:
+        return web.json_response({"success": False, "error": f"Server ID '{server_id}' not found"})
+
+    collections_mgr.reset_session()
+    active = cfg.get_active_server()
+    emit_log(f"Active media server switched to: '{active.get('name')}' ({active.get('url')})")
+
+    return web.json_response({
+        "success": True,
+        "active_id": cfg.get_active_server_id(),
+        "server": {
+            "id": active.get("id"),
+            "name": active.get("name"),
+            "url": active.get("url"),
+            "user": active.get("user")
+        }
+    })
+
+@routes.post("/api/servers/save")
+async def save_server_handler(request):
+    data = await request.json()
+    server_data = data.get("server") or data
+    name = (server_data.get("name") or "").strip()
+    url = (server_data.get("url") or "").strip()
+
+    if not name or not url:
+        return web.json_response({"success": False, "error": "Server Name and URL are required"})
+
+    saved = cfg.save_server(server_data)
+    emit_log(f"Saved media server profile: '{saved.get('name')}'")
+    return web.json_response({"success": True, "server": saved})
+
+@routes.post("/api/servers/delete")
+async def delete_server_handler(request):
+    data = await request.json()
+    server_id = data.get("server_id")
+    if not server_id:
+        return web.json_response({"success": False, "error": "Missing server_id"})
+
+    ok = cfg.delete_server(server_id)
+    if not ok:
+        return web.json_response({"success": False, "error": "Cannot delete server (not found or only server profile)"})
+
+    emit_log(f"Deleted media server profile: '{server_id}'")
+    return web.json_response({
+        "success": True,
+        "active_id": cfg.get_active_server_id(),
+        "servers": cfg.get_servers(sanitize=True)
+    })
+
+@routes.post("/api/servers/test")
+async def test_server_handler(request):
+    data = await request.json()
+    url = data.get("url", "")
+    user = data.get("user", "")
+    pw = data.get("pass") or data.get("pw", "")
+    server_id = data.get("server_id") or data.get("id")
+    if not pw and server_id:
+        for s in cfg._settings.get("SERVERS", []):
+            if s.get("id") == server_id and s.get("pass"):
+                pw = s.get("pass")
+                break
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, cfg.test_jellyfin, url, user, pw)
+    return web.json_response(res)
+
 # --- Themes & Skins Endpoints ---
 @routes.get("/api/themes")
 async def get_themes_handler(request):
@@ -617,7 +830,8 @@ async def test_connection_handler(request):
 @routes.post("/api/settings/validate-path")
 async def validate_path_handler(request):
     data = await request.json()
-    path = data.get("path", "").strip()
+    path = (data.get("path") or "").strip()
+    category = (data.get("category") or "").strip().lower()
     create_if_missing = data.get("create_if_missing", False)
     
     if create_if_missing and path:
@@ -653,6 +867,43 @@ async def validate_path_handler(request):
         except Exception:
             pass
 
+    # Multi-drive locations and active write target
+    multi_drive = False
+    locations = []
+    active_target = None
+    if category:
+        try:
+            cands = directories_mgr.get_candidate_paths_for_library(category)
+            if len(cands) > 1:
+                multi_drive = True
+            for c in cands:
+                c_exists = os.path.exists(c) and os.path.isdir(c)
+                c_free_b = 0
+                c_tot_b = 0
+                c_disk = "media"
+                if c_exists:
+                    try:
+                        tot, u, f = shutil.disk_usage(c)
+                        c_free_b = f
+                        c_tot_b = tot
+                        curr = os.path.abspath(c)
+                        while curr != "/" and not os.path.ismount(curr):
+                            curr = os.path.dirname(curr)
+                        c_disk = os.path.basename(curr.rstrip("/")) or "media"
+                    except Exception:
+                        pass
+                locations.append({
+                    "path": c,
+                    "exists": c_exists,
+                    "disk_name": c_disk,
+                    "free_gb": round(c_free_b / (1024**3), 1),
+                    "free_human": format_bytes(c_free_b)
+                })
+            healthy = [l for l in locations if l["free_gb"] >= 50]
+            active_target = max(healthy, key=lambda x: x["free_gb"]) if healthy else (max(locations, key=lambda x: x["free_gb"]) if locations else None)
+        except Exception:
+            pass
+
     return web.json_response({
         "exists": exists,
         "is_dir": is_dir,
@@ -662,7 +913,10 @@ async def validate_path_handler(request):
         "total_human": total_human,
         "disk_mount": disk_mount,
         "disk_name": disk_name,
-        "writable": writable
+        "writable": writable,
+        "multi_drive": multi_drive,
+        "locations": locations,
+        "active_target": active_target
     })
 
 @routes.get("/api/settings/storage-summary")

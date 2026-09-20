@@ -2,11 +2,13 @@ import os
 import json
 import time
 import re
+import glob
 import urllib.request
 import urllib.error
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from config import get_jellyfin_url, get_jellyfin_user, get_jellyfin_pass, get_movies_dir
+from directories_manager import directories_mgr
 from logger import emit_log
 
 MCU_CHRONOLOGICAL = [
@@ -46,21 +48,31 @@ MCU_CHRONOLOGICAL = [
     "Deadpool & Wolverine"
 ]
 
+# Only truly missing films that need .disc placeholders
 MISSING_PLACEHOLDERS = [
+    # Lord of the Rings
     {"title": "The Lord of the Rings The Fellowship of the Ring", "year": "2001", "collection": "The Lord of the Rings Collection"},
     {"title": "The Lord of the Rings The Two Towers", "year": "2002", "collection": "The Lord of the Rings Collection"},
+    
+    # Jurassic Park
     {"title": "Jurassic Park", "year": "1993", "collection": "Jurassic Park Collection"},
     {"title": "Jurassic Park III", "year": "2001", "collection": "Jurassic Park Collection"},
     {"title": "Jurassic World", "year": "2015", "collection": "Jurassic Park Collection"},
     {"title": "Jurassic World Dominion", "year": "2022", "collection": "Jurassic Park Collection"},
+    
+    # Mad Max
     {"title": "Mad Max", "year": "1979", "collection": "Mad Max Collection"},
     {"title": "Mad Max 2", "year": "1981", "collection": "Mad Max Collection"},
     {"title": "Mad Max Beyond Thunderdome", "year": "1985", "collection": "Mad Max Collection"},
+    
+    # Transformers
     {"title": "Transformers Revenge of the Fallen", "year": "2009", "collection": "Transformers Collection"},
     {"title": "Transformers Dark of the Moon", "year": "2011", "collection": "Transformers Collection"},
     {"title": "Transformers Age of Extinction", "year": "2014", "collection": "Transformers Collection"},
     {"title": "Transformers The Last Knight", "year": "2017", "collection": "Transformers Collection"},
     {"title": "Transformers Rise of the Beasts", "year": "2023", "collection": "Transformers Collection"},
+    
+    # Rocky
     {"title": "Rocky II", "year": "1979", "collection": "Rocky Collection"},
     {"title": "Rocky III", "year": "1982", "collection": "Rocky Collection"},
     {"title": "Rocky IV", "year": "1985", "collection": "Rocky Collection"},
@@ -69,31 +81,35 @@ MISSING_PLACEHOLDERS = [
     {"title": "Creed", "year": "2015", "collection": "Rocky Collection"},
     {"title": "Creed II", "year": "2018", "collection": "Rocky Collection"},
     {"title": "Creed III", "year": "2023", "collection": "Rocky Collection"},
+    
+    # Gremlins
     {"title": "Gremlins 2 The New Batch", "year": "1990", "collection": "The Gremlins Collection"},
+    
+    # Underworld
     {"title": "Underworld", "year": "2003", "collection": "Underworld Collection"},
     {"title": "Underworld Rise of the Lycans", "year": "2009", "collection": "Underworld Collection"},
     {"title": "Underworld Awakening", "year": "2012", "collection": "Underworld Collection"},
-    {"title": "Man of Steel", "year": "2013", "collection": "DC Extended Universe Collection"},
-    {"title": "Batman v Superman Dawn of Justice", "year": "2016", "collection": "DC Extended Universe Collection"},
+    
+    # DC
     {"title": "Justice League", "year": "2017", "collection": "DC Extended Universe Collection"},
-    {"title": "Aquaman", "year": "2018", "collection": "DC Extended Universe Collection"},
-    {"title": "Birds of Prey", "year": "2020", "collection": "DC Extended Universe Collection"},
-    {"title": "Aquaman and the Lost Kingdom", "year": "2023", "collection": "DC Extended Universe Collection"},
-    {"title": "Star Wars The Force Awakens", "year": "2015", "collection": "Star Wars Collection"},
+    
+    # Star Wars
     {"title": "Star Wars The Last Jedi", "year": "2017", "collection": "Star Wars Collection"},
     {"title": "Star Wars The Rise of Skywalker", "year": "2019", "collection": "Star Wars Collection"},
     {"title": "Solo A Star Wars Story", "year": "2018", "collection": "Star Wars Collection"},
-    {"title": "Alien Covenant", "year": "2017", "collection": "Alien Collection"},
-    {"title": "Alien Romulus", "year": "2024", "collection": "Alien Collection"},
+
+    # Sonic
     {"title": "Sonic the Hedgehog 3", "year": "2024", "collection": "Sonic the Hedgehog Collection"}
 ]
 
+# Map BoxSet name or ID to Movie TmdbCollection ID if different
 BOXSET_TMDB_MAP = {
     "The Mummy Collection": "1733",
     "Underworld Collection": "2326",
     "A Quiet Place Collection": "521226",
     "Venom Collection": "558216",
-    "Tron Collection": "63043"
+    "Tron Collection": "63043",
+    "Rocky Collection": "1575"
 }
 
 CUSTOM_CSS = """
@@ -140,10 +156,16 @@ CUSTOM_CSS = """
 """
 
 def normalize(name: str) -> str:
+    if not name:
+        return ""
     return re.sub(r'[^a-zA-Z0-9]', '', name).lower()
 
 class CollectionsManager:
     def __init__(self):
+        self.token = None
+        self.user_id = None
+
+    def reset_session(self):
         self.token = None
         self.user_id = None
 
@@ -168,7 +190,7 @@ class CollectionsManager:
             emit_log(f"CollectionsManager login failed: {e}")
             return False
 
-    def api_request(self, path: str, method: str = "GET", data: Any = None):
+    def api_request(self, path: str, method: str = "GET", data: Any = None, retry_on_401: bool = True):
         if not self.token:
             if not self.login():
                 return None
@@ -191,6 +213,10 @@ class CollectionsManager:
                 res_data = res.read()
                 return json.loads(res_data.decode("utf-8")) if res_data else None
         except urllib.error.HTTPError as e:
+            if e.code == 401 and retry_on_401:
+                self.token = None
+                if self.login():
+                    return self.api_request(path, method=method, data=data, retry_on_401=False)
             if e.code != 204:
                 emit_log(f"Jellyfin API HTTP Error ({method} {path}): {e.code}")
             return None
@@ -241,52 +267,157 @@ class CollectionsManager:
         return overview
 
     def apply_custom_css(self):
-        emit_log("Applying Custom CSS for (Not Available) Items in Jellyfin...")
-        branding = self.api_request("/Branding/Configuration")
-        if branding is not None:
-            cur_css = branding.get("CustomCss", "") or ""
-            if "Auto-styled by Jellyfin Collection Fixer" not in cur_css:
-                new_css = cur_css + "\n" + CUSTOM_CSS
-                branding["CustomCss"] = new_css.strip()
-                self.api_request("/Branding/Configuration", method="POST", data=branding)
-                emit_log("Custom CSS applied to Jellyfin branding successfully.")
+        try:
+            branding = self.api_request("/Branding/Configuration")
+            if branding is not None:
+                cur_css = branding.get("CustomCss", "") or ""
+                if "Auto-styled by Jellyfin Collection Fixer" not in cur_css:
+                    new_css = cur_css + "\n" + CUSTOM_CSS
+                    branding["CustomCss"] = new_css.strip()
+                    self.api_request("/Branding/Configuration", method="POST", data=branding)
+                    emit_log("Custom CSS applied to Jellyfin branding successfully.")
+        except Exception as e:
+            emit_log(f"Note on Custom CSS: {e}")
 
-    def create_missing_placeholders(self):
+    def clean_redundant_placeholders(self, all_movies: Optional[List[Dict[str, Any]]] = None) -> int:
+        """Deletes any .disc placeholder and its companion art files on disk if the real movie is owned."""
+        if all_movies is None:
+            movies_data = self.api_request("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Path,ProductionYear")
+            all_movies = movies_data.get("Items", []) if movies_data else []
+
+        real_movies = [
+            m for m in all_movies
+            if not (m.get("Path", "").endswith(".disc")) and "(Not Available)" not in m.get("Name", "")
+        ]
+
+        candidate_dirs = directories_mgr.get_candidate_paths_for_library("movies")
+        primary = get_movies_dir()
+        if primary and primary not in candidate_dirs:
+            candidate_dirs.append(primary)
+
+        purged_count = 0
+        for folder in candidate_dirs:
+            if not os.path.exists(folder):
+                continue
+            try:
+                entries = os.listdir(folder)
+            except OSError:
+                continue
+
+            for f in entries:
+                if f.endswith(".disc"):
+                    disc_path = os.path.join(folder, f)
+                    clean_title = re.sub(r'[\(\[]?\b(19\d\d|20\d\d)\b[\)\]]?', '', f)
+                    clean_title = clean_title.replace("[Not Available]", "").replace(".disc", "").strip()
+                    fnorm = normalize(clean_title)
+
+                    ym = re.search(r'\b(19\d\d|20\d\d)\b', f)
+                    fyear = ym.group(1) if ym else ""
+
+                    matched_real = None
+                    for rm in real_movies:
+                        rname = rm.get("Name", "")
+                        ryear = str(rm.get("ProductionYear") or "")
+                        rnorm = normalize(rname)
+
+                        if (fnorm in rnorm or rnorm in fnorm) and (not fyear or not ryear or fyear == ryear) and len(fnorm) >= 4:
+                            matched_real = rm
+                            break
+
+                    if matched_real:
+                        stem = f[:-5]
+                        companion_patterns = [
+                            disc_path,
+                            os.path.join(folder, f"{stem}-poster.*"),
+                            os.path.join(folder, f"{stem}-backdrop.*"),
+                            os.path.join(folder, f"{stem}-landscape.*"),
+                            os.path.join(folder, f"{stem}-logo.*"),
+                            os.path.join(folder, f"{stem}.nfo"),
+                            os.path.join(folder, f"{stem}.trickplay")
+                        ]
+                        for pat in companion_patterns:
+                            for matched_file in glob.glob(pat):
+                                try:
+                                    os.remove(matched_file)
+                                except OSError:
+                                    pass
+                        purged_count += 1
+                        emit_log(f"Cleaned redundant placeholder: '{f}' (now owned: '{matched_real['Name']}')")
+
+        if purged_count > 0:
+            emit_log(f"Purged {purged_count} redundant placeholders from disk. Refreshing Jellyfin library...")
+            self.api_request("/Library/Refresh", method="POST")
+
+        return purged_count
+
+    def create_missing_placeholders(self, all_movies: Optional[List[Dict[str, Any]]] = None):
         emit_log("Checking for missing collection movie placeholders...")
-        movies_dir = get_movies_dir()
-        if not os.path.exists(movies_dir):
+        if all_movies is None:
+            movies_data = self.api_request("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Path,ProductionYear")
+            all_movies = movies_data.get("Items", []) if movies_data else []
+
+        real_movies = [
+            m for m in all_movies
+            if not (m.get("Path", "").endswith(".disc")) and "(Not Available)" not in m.get("Name", "")
+        ]
+
+        candidate_dirs = directories_mgr.get_candidate_paths_for_library("movies")
+        primary = get_movies_dir()
+        target_dir = primary if os.path.exists(primary) else (candidate_dirs[0] if candidate_dirs else None)
+        if not target_dir:
             return
 
-        existing_files = set(os.listdir(movies_dir))
         created = 0
         for p in MISSING_PLACEHOLDERS:
             title = p["title"]
-            year = p["year"]
+            year = str(p["year"])
             fname = f"{title} ({year}) [Not Available].disc"
-            
-            already_exists = False
-            for ef in existing_files:
-                if ef.startswith(f"{title} ({year})") and (ef.endswith(".mp4") or ef.endswith(".mkv") or ef.endswith(".disc")):
-                    already_exists = True
+            pnorm = normalize(title)
+
+            # Check if real movie is already registered in Jellyfin
+            already_owned = False
+            for rm in real_movies:
+                rname = rm.get("Name", "")
+                ryear = str(rm.get("ProductionYear") or "")
+                rnorm = normalize(rname)
+                if (pnorm in rnorm or rnorm in pnorm) and (not year or not ryear or year == ryear):
+                    already_owned = True
                     break
-            
-            if not already_exists:
-                dest_path = os.path.join(movies_dir, fname)
+
+            if already_owned:
+                continue
+
+            # Check if file exists across candidate directories
+            file_exists = False
+            for cdir in candidate_dirs:
+                if not os.path.exists(cdir):
+                    continue
+                try:
+                    for ef in os.listdir(cdir):
+                        if ef.startswith(f"{title} ({year})") and (ef.endswith(".mp4") or ef.endswith(".mkv") or ef.endswith(".disc")):
+                            file_exists = True
+                            break
+                except OSError:
+                    pass
+                if file_exists:
+                    break
+
+            if not file_exists:
+                dest_path = os.path.join(target_dir, fname)
                 try:
                     with open(dest_path, "w") as f:
                         pass
                     created += 1
-                    emit_log(f"Created placeholder: {fname}")
+                    emit_log(f"Created missing placeholder: {fname}")
                 except Exception as e:
                     emit_log(f"Error creating placeholder {fname}: {e}")
 
         if created > 0:
             emit_log(f"Created {created} new placeholders. Triggering library refresh...")
             self.api_request("/Library/Refresh", method="POST")
-            time.sleep(12)
+            time.sleep(10)
 
     def format_placeholder_names(self):
-        emit_log("Formatting placeholder names to include '(Not Available)'...")
         movies_data = self.api_request("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Path")
         if not movies_data:
             return
@@ -306,18 +437,205 @@ class CollectionsManager:
                         self.api_request(f"/Items/{mid}", method="POST", data=details)
                         emit_log(f"Updated placeholder: '{name}' -> '{new_name}'")
 
+    def deduplicate_targets(self, target_movies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Deduplicates movies within a collection: prefers real movies over placeholders, avoids duplicates."""
+        grouped = {}
+        for m in target_movies:
+            name = m.get("Name", "").replace("(Not Available)", "").strip()
+            year = str(m.get("ProductionYear") or "")
+            path = m.get("Path", "")
+            is_placeholder = path.endswith(".disc") or "(Not Available)" in m.get("Name", "")
+
+            norm_key = (normalize(name), year)
+
+            if norm_key not in grouped:
+                grouped[norm_key] = m
+            else:
+                existing = grouped[norm_key]
+                exist_is_placeholder = existing.get("Path", "").endswith(".disc") or "(Not Available)" in existing.get("Name", "")
+                if exist_is_placeholder and not is_placeholder:
+                    grouped[norm_key] = m
+                elif not exist_is_placeholder and not is_placeholder:
+                    if "[voiceover]" in existing.get("Path", "").lower() and "[voiceover]" not in path.lower():
+                        grouped[norm_key] = m
+
+        deduped = list(grouped.values())
+        deduped.sort(key=lambda x: (x.get("ProductionYear") or 9999, x.get("Name", "")))
+        return deduped
+
+    def sync_single_boxset(self, b: Dict[str, Any], all_movies: List[Dict[str, Any]], movies_by_tmdb_coll: Dict[str, List[Dict[str, Any]]]) -> int:
+        bname = b["Name"]
+        bid = b["Id"]
+        bproviders = b.get("ProviderIds", {})
+        btmdb = str(bproviders.get("Tmdb", ""))
+
+        if bname in BOXSET_TMDB_MAP:
+            btmdb = BOXSET_TMDB_MAP[bname]
+
+        target_movies = []
+        if btmdb and btmdb in movies_by_tmdb_coll:
+            target_movies.extend(movies_by_tmdb_coll[btmdb])
+
+        bname_lower = bname.lower()
+        if "rocky" in bname_lower:
+            if "553717" in movies_by_tmdb_coll:
+                target_movies.extend(movies_by_tmdb_coll["553717"])
+            for m in all_movies:
+                mn = m["Name"].lower()
+                if "rocky" in mn or "creed" in mn:
+                    target_movies.append(m)
+
+        elif "marvel cinematic universe" in bname_lower:
+            norm_chrono = [normalize(t) for t in MCU_CHRONOLOGICAL]
+            for m in all_movies:
+                mnorm = normalize(m["Name"].replace("(Not Available)", ""))
+                if any(mnorm == target or target in mnorm for target in norm_chrono):
+                    target_movies.append(m)
+
+        elif "dc extended universe" in bname_lower:
+            dceu_kws = ["man of steel", "batman v superman", "suicide squad", "wonder woman", "justice league", "aquaman", "shazam", "birds of prey", "black adam", "the flash", "blue beetle"]
+            for m in all_movies:
+                mnorm = m["Name"].lower()
+                if any(kw in mnorm for kw in dceu_kws) and "nolan" not in mnorm:
+                    target_movies.append(m)
+
+        elif "godzilla" in bname_lower or "monsterverse" in bname_lower:
+            for m in all_movies:
+                mnorm = m["Name"].lower()
+                if any(kw in mnorm for kw in ["godzilla", "kong"]) and "minus one" not in mnorm:
+                    target_movies.append(m)
+
+        elif "star wars" in bname_lower:
+            for m in all_movies:
+                mnorm = m["Name"].lower()
+                if "star wars" in mnorm or "empire strikes" in mnorm or "return of the jedi" in mnorm or "rogue one" in mnorm or "solo" in mnorm:
+                    target_movies.append(m)
+
+        elif "unbreakable" in bname_lower:
+            for m in all_movies:
+                mnorm = m["Name"].lower()
+                if any(kw in mnorm for kw in ["unbreakable", "split", "glass"]):
+                    target_movies.append(m)
+
+        elif "alien" in bname_lower and "vs" not in bname_lower:
+            for m in all_movies:
+                mnorm = m["Name"].lower()
+                if ("prometheus" in mnorm or "alien" in mnorm) and "predator" not in mnorm:
+                    target_movies.append(m)
+
+        elif "predator" in bname_lower and "vs" not in bname_lower:
+            for m in all_movies:
+                mnorm = m["Name"].lower()
+                if ("predator" in mnorm or "prey" in mnorm) and "alien vs" not in mnorm and "avp" not in mnorm:
+                    target_movies.append(m)
+
+        elif "transformers" in bname_lower:
+            for m in all_movies:
+                mnorm = m["Name"].lower()
+                if "transformers" in mnorm or "bumblebee" in mnorm:
+                    target_movies.append(m)
+
+        elif "a quiet place" in bname_lower:
+            for m in all_movies:
+                if "quiet place" in m["Name"].lower():
+                    target_movies.append(m)
+
+        elif "sonic" in bname_lower:
+            for m in all_movies:
+                if "sonic" in m["Name"].lower():
+                    target_movies.append(m)
+
+        elif "cloverfield" in bname_lower:
+            for m in all_movies:
+                if "cloverfield" in m["Name"].lower():
+                    target_movies.append(m)
+
+        elif "jumanji" in bname_lower:
+            for m in all_movies:
+                if "jumanji" in m["Name"].lower():
+                    target_movies.append(m)
+
+        elif "men in black" in bname_lower:
+            for m in all_movies:
+                mn = m["Name"].lower()
+                if "men in black" in mn or "mib" in mn:
+                    target_movies.append(m)
+
+        elif "the mummy" in bname_lower:
+            for m in all_movies:
+                if "mummy" in m["Name"].lower():
+                    target_movies.append(m)
+
+        elif "underworld" in bname_lower:
+            for m in all_movies:
+                if "underworld" in m["Name"].lower():
+                    target_movies.append(m)
+
+        elif "tron" in bname_lower:
+            for m in all_movies:
+                if "tron" in m["Name"].lower():
+                    target_movies.append(m)
+
+        elif "venom" in bname_lower:
+            for m in all_movies:
+                if "venom" in m["Name"].lower():
+                    target_movies.append(m)
+
+        elif "spider-man (mcu)" in bname_lower:
+            for m in all_movies:
+                mn = m["Name"].lower()
+                if "homecoming" in mn or "far from home" in mn or "no way home" in mn:
+                    target_movies.append(m)
+
+        elif "the amazing spider-man" in bname_lower:
+            for m in all_movies:
+                if "amazing spider-man" in m["Name"].lower():
+                    target_movies.append(m)
+
+        elif "spider-man" in bname_lower:
+            for m in all_movies:
+                mn = m["Name"].lower()
+                if "spider-man" in mn and "amazing" not in mn and "homecoming" not in mn and "far from" not in mn and "no way" not in mn:
+                    target_movies.append(m)
+
+        # Deduplicate & sort
+        deduped = self.deduplicate_targets(target_movies)
+
+        # Bi-directional sync with Jellyfin
+        cur_items_data = self.api_request(f"/Items?ParentId={bid}&Fields=Path")
+        current_ids = set(it["Id"] for it in (cur_items_data.get("Items", []) if cur_items_data else []))
+        target_ids = set(m["Id"] for m in deduped)
+
+        to_remove = current_ids - target_ids
+        to_add = target_ids - current_ids
+
+        if to_remove:
+            rem_str = ",".join(to_remove)
+            self.api_request(f"/Collections/{bid}/Items?ids={rem_str}", method="DELETE")
+            emit_log(f"Removed {len(to_remove)} redundant/duplicate items from '{bname}'.")
+
+        if to_add:
+            add_str = ",".join(to_add)
+            self.api_request(f"/Collections/{bid}/Items?ids={add_str}", method="POST")
+            emit_log(f"Added {len(to_add)} movies to '{bname}'.")
+
+        return len(deduped)
+
     def sync_all_collections(self) -> Dict[str, Any]:
         emit_log("=== Synchronizing All Jellyfin Collections ===")
         self.apply_custom_css()
-        self.create_missing_placeholders()
+
+        movies_data = self.api_request("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=ProviderIds,Path,ProductionYear")
+        all_movies = movies_data.get("Items", []) if movies_data else []
+
+        # 1. Clean redundant placeholders for movies we now own
+        self.clean_redundant_placeholders(all_movies)
+
+        # 2. Re-create truly missing placeholders
+        self.create_missing_placeholders(all_movies)
         self.format_placeholder_names()
 
-        boxsets_data = self.api_request("/Items?IncludeItemTypes=BoxSet&Recursive=true&Fields=ProviderIds")
-        if not boxsets_data:
-            emit_log("No boxsets found.")
-            return {"success": False, "error": "No boxsets found"}
-
-        boxsets = boxsets_data.get("Items", [])
+        # Re-fetch movies after placeholder adjustments
         movies_data = self.api_request("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=ProviderIds,Path,ProductionYear")
         all_movies = movies_data.get("Items", []) if movies_data else []
 
@@ -329,77 +647,16 @@ class CollectionsManager:
             if tmdb_coll:
                 movies_by_tmdb_coll.setdefault(str(tmdb_coll), []).append(m)
 
+        boxsets_data = self.api_request("/Items?IncludeItemTypes=BoxSet&Recursive=true&Fields=ProviderIds")
+        if not boxsets_data:
+            emit_log("No boxsets found.")
+            return {"success": False, "error": "No boxsets found"}
+
+        boxsets = boxsets_data.get("Items", [])
         updated_count = 0
         for b in sorted(boxsets, key=lambda x: x["Name"]):
-            bname = b["Name"]
-            bid = b["Id"]
-            bproviders = b.get("ProviderIds", {})
-            btmdb = str(bproviders.get("Tmdb", ""))
-
-            if bname in BOXSET_TMDB_MAP:
-                btmdb = BOXSET_TMDB_MAP[bname]
-
-            target_movies = []
-            if btmdb and btmdb in movies_by_tmdb_coll:
-                target_movies.extend(movies_by_tmdb_coll[btmdb])
-
-            # Franchise rules
-            if "Rocky" in bname and "553717" in movies_by_tmdb_coll:
-                target_movies.extend(movies_by_tmdb_coll["553717"])
-
-            elif "Marvel Cinematic Universe" in bname:
-                norm_chrono = [normalize(t) for t in MCU_CHRONOLOGICAL]
-                for m in all_movies:
-                    mnorm = normalize(m["Name"].replace("(Not Available)", ""))
-                    if any(mnorm == target or target in mnorm for target in norm_chrono):
-                        target_movies.append(m)
-
-            elif "DC Extended Universe" in bname:
-                dceu_kws = ["man of steel", "batman v superman", "suicide squad", "wonder woman", "justice league", "aquaman", "shazam", "birds of prey", "black adam", "the flash", "blue beetle"]
-                for m in all_movies:
-                    mnorm = m["Name"].lower()
-                    if any(kw in mnorm for kw in dceu_kws) and "nolan" not in mnorm:
-                        target_movies.append(m)
-
-            elif "Godzilla x Kong" in bname or "MonsterVerse" in bname:
-                for m in all_movies:
-                    mnorm = m["Name"].lower()
-                    if any(kw in mnorm for kw in ["godzilla", "kong"]) and "minus one" not in mnorm:
-                        target_movies.append(m)
-
-            elif "Star Wars" in bname:
-                for m in all_movies:
-                    mnorm = m["Name"].lower()
-                    if "star wars" in mnorm or "empire strikes" in mnorm or "return of the jedi" in mnorm or "rogue one" in mnorm or "solo" in mnorm:
-                        target_movies.append(m)
-
-            elif "Unbreakable" in bname:
-                for m in all_movies:
-                    mnorm = m["Name"].lower()
-                    if any(kw in mnorm for kw in ["unbreakable", "split", "glass"]):
-                        target_movies.append(m)
-
-            elif "Alien Collection" in bname:
-                for m in all_movies:
-                    mnorm = m["Name"].lower()
-                    if ("prometheus" in mnorm or "alien" in mnorm) and "predator" not in mnorm:
-                        target_movies.append(m)
-
-            elif "Transformers" in bname:
-                for m in all_movies:
-                    mnorm = m["Name"].lower()
-                    if "transformers" in mnorm or "bumblebee" in mnorm:
-                        target_movies.append(m)
-
-            # Deduplicate & Sort
-            unique = {m["Id"]: m for m in target_movies}
-            sorted_targets = sorted(unique.values(), key=lambda x: (x.get("ProductionYear") or 9999, x.get("Name", "")))
-
-            if sorted_targets:
-                ids_str = ",".join([m["Id"] for m in sorted_targets])
-                self.api_request(f"/Collections/{bid}/Items?ids={ids_str}", method="POST")
-                updated_count += 1
-                emit_log(f"Collection '{bname}' synchronized with {len(sorted_targets)} movies.")
+            self.sync_single_boxset(b, all_movies, movies_by_tmdb_coll)
+            updated_count += 1
 
         # Refresh collections folder
         virtual_folders = self.api_request("/Library/VirtualFolders")
@@ -410,7 +667,35 @@ class CollectionsManager:
                     if cid:
                         self.api_request(f"/Items/{cid}/Refresh?Recursive=true", method="POST")
 
-        emit_log(f"=== Collections Synchronization Complete ({updated_count} collections updated) ===")
+        emit_log(f"=== Collections Synchronization Complete ({updated_count} collections verified) ===")
         return {"success": True, "updated_count": updated_count}
+
+    def sync_single_collection_by_id(self, collection_id: str) -> Dict[str, Any]:
+        """Synchronizes just one collection given its Jellyfin ID."""
+        boxsets_data = self.api_request("/Items?IncludeItemTypes=BoxSet&Recursive=true&Fields=ProviderIds")
+        if not boxsets_data:
+            return {"success": False, "error": "No boxsets found"}
+
+        target_b = None
+        for b in boxsets_data.get("Items", []):
+            if b["Id"] == collection_id:
+                target_b = b
+                break
+
+        if not target_b:
+            return {"success": False, "error": f"Collection ID {collection_id} not found."}
+
+        movies_data = self.api_request("/Items?IncludeItemTypes=Movie&Recursive=true&Fields=ProviderIds,Path,ProductionYear")
+        all_movies = movies_data.get("Items", []) if movies_data else []
+
+        movies_by_tmdb_coll = {}
+        for m in all_movies:
+            providers = m.get("ProviderIds", {})
+            tmdb_coll = providers.get("TmdbCollection")
+            if tmdb_coll:
+                movies_by_tmdb_coll.setdefault(str(tmdb_coll), []).append(m)
+
+        count = self.sync_single_boxset(target_b, all_movies, movies_by_tmdb_coll)
+        return {"success": True, "collection_name": target_b["Name"], "total_items": count}
 
 collections_mgr = CollectionsManager()
