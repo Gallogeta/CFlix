@@ -244,6 +244,21 @@ CFMM will bind to `http://0.0.0.0:8090`.
 
 ---
 
+## ⚡ Zero-Disk-Wear In-RAM Transcoding Optimizer (32GB RAM Setup)
+
+CFMM includes an automated optimizer script in `scripts/setup-ram-transcoding.sh` to configure Jellyfin to transcode entirely in RAM using an 8GB `tmpfs` sliding-window buffer:
+- **Zero SSD / HDD Wear**: Completely eliminates disk writes during video playback, saving drive lifespan.
+- **Aggressive Sliding Window Purge**: Past video segments are purged after 60s; future transcode buffer throttles at 120s ahead.
+- **Tiny Memory Footprint**: Only consumes ~150 MB – 300 MB of RAM while actively streaming.
+
+To optimize your Jellyfin server (works on Docker, Proxmox LXC/VM, or bare-metal):
+
+```bash
+sudo bash scripts/setup-ram-transcoding.sh
+```
+
+---
+
 ## 📄 License
 
 This project is licensed under the GNU General Public License v3.0 (GPL-3.0). See [LICENSE](LICENSE) for details.
